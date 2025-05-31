@@ -3,3 +3,5 @@ tgcrypto
 requests
 pytz
 supabase
+python-telegram-bot==20.7
+beautifulsoup4
