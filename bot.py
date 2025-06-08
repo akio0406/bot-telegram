@@ -73,19 +73,28 @@ def restricted():
             if isinstance(update, (Message, CallbackQuery)) else None
         )
         if not user_id:
+            print("[restricted] No user_id found in update.")
             return False
 
         def query():
-            res = supabase.from_("xeno_keys") \
-                .select("banned") \
-                .eq("redeemed_by", user_id) \
-                .eq("banned", False) \
-                .limit(1) \
-                .execute()
-            return res.data if hasattr(res, "data") else res.get("data")
+            try:
+                res = supabase.from_("xeno_keys") \
+                    .select("banned") \
+                    .eq("redeemed_by", user_id) \
+                    .eq("banned", False) \
+                    .limit(1) \
+                    .execute()
+                # res.data is the usual field but sometimes might be a dict
+                data = res.data if hasattr(res, "data") else res.get("data")
+                return data
+            except Exception as e:
+                print(f"[restricted] Exception querying supabase for user {user_id}: {e}")
+                return None
 
         data = await asyncio.to_thread(query)
-        return bool(data)
+        has_access = bool(data)
+        print(f"[restricted] Access check for user {user_id}: {has_access}")
+        return has_access
 
     return filters.create(decorator_filter)
     
