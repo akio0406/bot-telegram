@@ -5,9 +5,9 @@ from supabase import create_client  # ✅ You were missing this
 import os
 
 # === Config ===
-API_ID = 22193151
-API_HASH = "7b38173cfec819a182c81a89abdef224"
-BOT_TOKEN = "7976486179:AAFe7462sUPNmxBQaN-MDCICIN9YqEKbMnw"
+API_ID = 26024182
+API_HASH = "19af4be4f201f1b2749ef3896c42e089"
+BOT_TOKEN = "7796863520:AAEuYaU_FUh-PutGjlZTGjapOSIFxqi4gFU"
 ADMIN_ID = 5110224851
 
 SUPABASE_URL = "https://psxjagzdlcrxtonmezpm.supabase.co"
