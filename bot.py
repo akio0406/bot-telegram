@@ -59,11 +59,34 @@ async def start(client, message):
         reply_markup=keyboard
     )
 
+async def check_user_access(user_id):
+    now = datetime.now(timezone.utc)
+    try:
+        response = supabase.table("xeno_keys") \
+            .select("expiry, banned") \
+            .eq("redeemed_by", user_id) \
+            .eq("banned", False) \
+            .execute()
+        
+        rows = response.data
+        if not rows:
+            return False
+
+        for row in rows:
+            expiry = datetime.fromisoformat(row["expiry"].replace('Z', '+00:00'))
+            if expiry > now:
+                return True
+        return False
+
+    except Exception as e:
+        print(f"[ERROR] check_user_access failed for user {user_id}: {e}")
+        return False
+
 # /menu command — shows User Menu
 @app.on_message(filters.command("menu") & filters.private)
 async def show_command(client, message, edit=False, from_id=None):
     user_id = from_id or message.from_user.id
-    if not check_user_access(user_id):
+    if not await check_user_access(user_id):
         return await message.reply("⛔ ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ʀᴇᴅᴇᴇᴍ ᴀ ᴠᴀʟɪᴅ ᴋᴇʏ ꜰɪʀꜱᴛ.")
 
     keyboard = InlineKeyboardMarkup([
