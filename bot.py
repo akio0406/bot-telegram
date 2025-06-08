@@ -281,6 +281,7 @@ async def decrypt_command(client, message):
 
 @app.on_callback_query(filters.regex("^menu_encrypt$") & restricted())
 async def cb_encrypt(client, cb):
+    await cb.answer()  # ✅ Acknowledge the callback
     if not await check_user_access(cb.from_user.id):
         return await cb.answer("⛔ ɴᴏ ᴀᴄᴄᴇꜱꜱ. ᴘʟᴇᴀꜱᴇ ʀᴇᴅᴇᴇᴍ ᴀ ᴋᴇʏ.", show_alert=True)
     user_state[cb.from_user.id] = "encrypt"
@@ -288,6 +289,7 @@ async def cb_encrypt(client, cb):
 
 @app.on_callback_query(filters.regex("^menu_decrypt$") & restricted())
 async def cb_decrypt(client, cb):
+    await cb.answer()  # ✅ Acknowledge the callback
     if not await check_user_access(cb.from_user.id):
         return await cb.answer("⛔ ɴᴏ ᴀᴄᴄᴇꜱꜱ. ᴘʟᴇᴀꜱᴇ ʀᴇᴅᴇᴇᴍ ᴀ ᴋᴇʏ.", show_alert=True)
     user_state[cb.from_user.id] = "decrypt"
