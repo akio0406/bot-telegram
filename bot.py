@@ -214,6 +214,9 @@ async def redeem_command(client, message):
         print("[ERROR] Redeem failed:", e)
         await message.reply("❌ Something went wrong. Please try again.")
 
+user_state = {}  # Tracks which user is encrypting or decrypting
+MAX_SIZE = 10 * 1024 * 1024  # 10 MB file size limit
+
 # /menu command — shows User Menu
 @app.on_message(filters.command("menu") & filters.private)
 async def show_command(client, message):
