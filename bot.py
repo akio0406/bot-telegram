@@ -30,6 +30,65 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 # === Initialize Pyrogram Bot ===
 app = Client("log_search_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+async def check_user_access(user_id):
+    now = datetime.now(timezone.utc)
+    try:
+        response = supabase.table("xeno_keys") \
+            .select("expiry, banned") \
+            .eq("redeemed_by", user_id) \
+            .eq("banned", False) \
+            .execute()
+
+        rows = response.data
+        if not rows:
+            return False
+
+        for row in rows:
+            expiry = datetime.fromisoformat(row["expiry"].replace('Z', '+00:00'))
+            if expiry > now:
+                return True
+        return False
+
+    except Exception as e:
+        print(f"[ERROR] check_user_access failed for user {user_id}: {e}")
+        return False
+
+def parse_duration(code):
+    try:
+        unit = code[-1]
+        value = int(code[:-1])
+        if unit == 'm':
+            return timedelta(minutes=value)
+        elif unit == 'h':
+            return timedelta(hours=value)
+        elif unit == 'd':
+            return timedelta(days=value)
+    except:
+        return timedelta(seconds=0)
+
+def restricted():
+    async def decorator_filter(client, update, _=None):
+        user_id = (
+            update.from_user.id
+            if isinstance(update, (Message, CallbackQuery)) else None
+        )
+        if not user_id:
+            return False
+
+        def query():
+            res = supabase.from_("xeno_keys") \
+                .select("banned") \
+                .eq("redeemed_by", user_id) \
+                .eq("banned", False) \
+                .limit(1) \
+                .execute()
+            return res.data if hasattr(res, "data") else res.get("data")
+
+        data = await asyncio.to_thread(query)
+        return bool(data)
+
+    return filters.create(decorator_filter)
+    
 import base64
 import os
 import re
@@ -213,65 +272,6 @@ async def start(client, message):
         "👋 ᴡᴇʟᴄᴏᴍᴇ ʏᴏᴜ ɴᴇᴇᴅ ᴀ ᴋᴇʏ ᴛᴏ ᴀᴄᴄᴇꜱꜱ ᴛʜᴇ ʙᴏᴛ",
         reply_markup=keyboard
     )
-
-async def check_user_access(user_id):
-    now = datetime.now(timezone.utc)
-    try:
-        response = supabase.table("xeno_keys") \
-            .select("expiry, banned") \
-            .eq("redeemed_by", user_id) \
-            .eq("banned", False) \
-            .execute()
-
-        rows = response.data
-        if not rows:
-            return False
-
-        for row in rows:
-            expiry = datetime.fromisoformat(row["expiry"].replace('Z', '+00:00'))
-            if expiry > now:
-                return True
-        return False
-
-    except Exception as e:
-        print(f"[ERROR] check_user_access failed for user {user_id}: {e}")
-        return False
-
-def parse_duration(code):
-    try:
-        unit = code[-1]
-        value = int(code[:-1])
-        if unit == 'm':
-            return timedelta(minutes=value)
-        elif unit == 'h':
-            return timedelta(hours=value)
-        elif unit == 'd':
-            return timedelta(days=value)
-    except:
-        return timedelta(seconds=0)
-
-def restricted():
-    async def decorator_filter(client, update, _=None):
-        user_id = (
-            update.from_user.id
-            if isinstance(update, (Message, CallbackQuery)) else None
-        )
-        if not user_id:
-            return False
-
-        def query():
-            res = supabase.from_("xeno_keys") \
-                .select("banned") \
-                .eq("redeemed_by", user_id) \
-                .eq("banned", False) \
-                .limit(1) \
-                .execute()
-            return res.data if hasattr(res, "data") else res.get("data")
-
-        data = await asyncio.to_thread(query)
-        return bool(data)
-
-    return filters.create(decorator_filter)
     
 @app.on_message(filters.command("genkey") & filters.private & filters.user(ADMIN_ID))
 async def manual_genkey_command(client, message):
