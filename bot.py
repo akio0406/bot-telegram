@@ -338,4 +338,6 @@ async def redeem_command(client, message):
         print("[ERROR] Redeem failed:", e)
         await message.reply("❌ Something went wrong. Please try again.")
     
-app.run()
+if __name__ == "__main__":
+    app.run()
+
