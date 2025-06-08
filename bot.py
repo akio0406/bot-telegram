@@ -233,4 +233,113 @@ async def redeem_command(client, message):
         print("[ERROR] Redeem failed:", e)
         await message.reply("❌ Something went wrong. Please try again.")
 
+import os
+import base64
+import re
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from config import MAX_SIZE
+
+user_state = {}
+
+@app.on_message(filters.command("encrypt") & filters.private & restricted())
+async def encrypt_command(client, message):
+    user_state[message.from_user.id] = "encrypt"
+    await message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
+
+@app.on_message(filters.command("decrypt") & filters.private & restricted())
+async def decrypt_command(client, message):
+    user_state[message.from_user.id] = "decrypt"
+    await message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛʜᴀᴛ ᴡᴀꜱ ᴇɴᴄʀʏᴘᴛᴇᴅ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ ɪᴛ.")
+
+@app.on_callback_query(filters.regex("^menu_encrypt$") & restricted())
+async def cb_encrypt(client, cb):
+    if not check_user_access(cb.from_user.id):
+        return await cb.answer("⛔ ɴᴏ ᴀᴄᴄᴇꜱꜱ. ᴘʟᴇᴀꜱᴇ ʀᴇᴅᴇᴇᴍ ᴀ ᴋᴇʏ.", show_alert=True)
+    user_state[cb.from_user.id] = "encrypt"
+    await cb.message.reply("📂 ꜱᴇɴᴅ ᴀ .py ᴏʀ .txt ꜰɪʟᴇ ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
+
+@app.on_callback_query(filters.regex("^menu_decrypt$") & restricted())
+async def cb_decrypt(client, cb):
+    if not check_user_access(cb.from_user.id):
+        return await cb.answer("⛔ ɴᴏ ᴀᴄᴄᴇꜱꜱ. ᴘʟᴇᴀꜱᴇ ʀᴇᴅᴇᴇᴍ ᴀ ᴋᴇʏ.", show_alert=True)
+    user_state[cb.from_user.id] = "decrypt"
+    await cb.message.reply("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ .py ᴏʀ .txt ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
+
+@app.on_message(filters.document)
+async def handle_uploaded_file(client, message: Message):
+    user_id = message.from_user.id
+    state = user_state.get(user_id)
+
+    if state == "encrypt":
+        await encrypt_file(client, message)
+    elif state == "decrypt":
+        await decrypt_file(client, message)
+
+async def encrypt_file(client, message):
+    user_id = message.from_user.id
+    user_state.pop(user_id, None)
+
+    doc = message.document
+    file_name = doc.file_name
+    if not (file_name.endswith(".py") or file_name.endswith(".txt")):
+        return await message.reply("❌ ᴏɴʟʏ `.py` ᴏʀ `.txt` ꜰɪʟᴇꜱ ᴀʀᴇ ᴀʟʟᴏᴡᴇᴅ.")
+    if doc.file_size > MAX_SIZE:
+        return await message.reply("❌ ꜰɪʟᴇ ᴛᴏᴏ ʟᴀʀɢᴇ. ᴍᴀx ꜱɪᴢᴇ ɪꜱ 10ᴍʙ.")
+
+    progress = await message.reply("⏳ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ...")
+    path = await client.download_media(message)
+    await progress.edit("🔐 ᴇɴᴄʀʏᴘᴛɪɴɢ...")
+
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        raw = f.read()
+    encoded = base64.b64encode(raw.encode()).decode()
+    encrypted = f"import base64\nexec(base64.b64decode('{encoded}').decode('utf-8'))\n"
+
+    out_file = f"ᴇɴᴄʀʏᴘᴛᴇᴅ_{file_name}"
+    with open(out_file, "w", encoding="utf-8") as f:
+        f.write(encrypted)
+
+    await client.send_document(message.chat.id, document=out_file, caption="✅ ᴇɴᴄʀʏᴘᴛᴇᴅ ꜰɪʟᴇ ʀᴇᴀᴅʏ.")
+    await progress.delete()
+    os.remove(path)
+    os.remove(out_file)
+
+async def decrypt_file(client, message):
+    user_id = message.from_user.id
+    user_state.pop(user_id, None)
+
+    doc = message.document
+    file_name = doc.file_name
+    if not (file_name.endswith(".py") or file_name.endswith(".txt")):
+        return await message.reply("❌ ᴏɴʟʏ `.py` ᴏʀ `.txt` ꜰɪʟᴇꜱ ᴀʀᴇ ᴀʟʟᴏᴡᴇᴅ.")
+    if doc.file_size > MAX_SIZE:
+        return await message.reply("❌ ꜰɪʟᴇ ᴛᴏᴏ ʟᴀʀɢᴇ. ᴍᴀx ꜱɪᴢᴇ ɪꜱ 10ᴍʙ.")
+
+    progress = await message.reply("⏳ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ...")
+    path = await client.download_media(message)
+    await progress.edit("🔓 ᴅᴇᴄʀʏᴘᴛɪɴɢ...")
+
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        content = f.read()
+    match = re.search(r"base64\.b64decode\('(.+?)'\)", content)
+    if not match:
+        os.remove(path)
+        return await progress.edit("❌ ᴇɴᴄʀʏᴘᴛᴇᴅ ᴄᴏɴᴛᴇɴᴛ ɴᴏᴛ ꜰᴏᴜɴᴅ.")
+
+    try:
+        decoded = base64.b64decode(match.group(1)).decode("utf-8")
+    except Exception as e:
+        os.remove(path)
+        return await progress.edit(f"❌ ᴅᴇᴄʀʏᴘᴛɪᴏɴ ꜰᴀɪʟᴇᴅ: {e}")
+
+    out_file = f"ᴅᴇᴄʀʏᴘᴛᴇᴅ_{file_name}"
+    with open(out_file, "w", encoding="utf-8") as f:
+        f.write(decoded)
+
+    await client.send_document(message.chat.id, document=out_file, caption="✅ ᴅᴇᴄʀʏᴘᴛᴇᴅ ꜰɪʟᴇ ɪꜱ ʀᴇᴀᴅʏ.")
+    await progress.delete()
+    os.remove(path)
+    os.remove(out_file)
+    
 app.run()
