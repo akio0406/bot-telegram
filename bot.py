@@ -241,6 +241,7 @@ from pyrogram.types import Message
 from config import MAX_SIZE
 
 user_state = {}
+MAX_SIZE = 10485760  # example max size in bytes (10 MB)
 
 @app.on_message(filters.command("encrypt") & filters.private & restricted())
 async def encrypt_command(client, message):
