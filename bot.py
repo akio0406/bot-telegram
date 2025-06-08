@@ -6,9 +6,15 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
 
 from supabase import create_client
+
 
 # === Config ===
 API_ID = 26024182
