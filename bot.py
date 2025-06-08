@@ -237,16 +237,25 @@ import asyncio
 from pyrogram import filters
 
 def restricted():
-    async def decorator_filter(client, message):
-        user_id = message.from_user.id if message.from_user else None
+    async def decorator_filter(client, update, data):
+        message = update.message or update  # to safely get the message object
+        user_id = message.from_user.id if message and message.from_user else None
         if not user_id:
             return False
+        
         # Supabase query in thread to avoid blocking
         def query():
-            res = supabase.from_("xeno_keys").select("banned").eq("redeemed_by", user_id).eq("banned", False).limit(1).execute()
+            res = supabase.from_("xeno_keys") \
+                .select("banned") \
+                .eq("redeemed_by", user_id) \
+                .eq("banned", False) \
+                .limit(1) \
+                .execute()
             return res.data if hasattr(res, "data") else res.get("data")
+        
         data = await asyncio.to_thread(query)
         return bool(data and len(data) > 0)
+    
     return filters.create(decorator_filter)
     
 import os
