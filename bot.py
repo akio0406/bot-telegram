@@ -1,8 +1,14 @@
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import datetime, timezone
-from supabase import create_client  # ✅ You were missing this
 import os
+import re
+import random
+import base64
+import asyncio
+from datetime import datetime, timedelta, timezone
+
+from pyrogram import Client, filters
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+
+from supabase import create_client
 
 # === Config ===
 API_ID = 26024182
@@ -133,9 +139,6 @@ async def show_admin_buttons(client, cb):
         reply_markup=keyboard
     )
 
-from datetime import timedelta
-import random
-
 def parse_duration(code):
     try:
         unit = code[-1]
@@ -233,16 +236,16 @@ async def redeem_command(client, message):
         print("[ERROR] Redeem failed:", e)
         await message.reply("❌ Something went wrong. Please try again.")
 
-import asyncio
-from pyrogram import filters
-
 def restricted():
-    async def decorator_filter(client, update, _):
-        # `update` is usually a Message for on_message handlers
-        user_id = update.from_user.id if update and update.from_user else None
-        if not user_id:
-            return False
-        
+    async def decorator_filter(client, update, _=None):
+        # Determine user ID based on update type
+        if isinstance(update, Message):
+            user_id = update.from_user.id
+        elif isinstance(update, CallbackQuery):
+            user_id = update.from_user.id
+        else:
+            return False  # Unknown type or no user
+
         def query():
             res = supabase.from_("xeno_keys") \
                 .select("banned") \
@@ -251,18 +254,12 @@ def restricted():
                 .limit(1) \
                 .execute()
             return res.data if hasattr(res, "data") else res.get("data")
-        
+
         data = await asyncio.to_thread(query)
-        return bool(data and len(data) > 0)
-    
+        return bool(data)
+
     return filters.create(decorator_filter)
     
-import os
-import base64
-import re
-from pyrogram import Client, filters
-from pyrogram.types import Message
-
 user_state = {}
 MAX_SIZE = 10485760  # example max size in bytes (10 MB)
 
