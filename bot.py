@@ -15,7 +15,6 @@ from pyrogram.types import (
 
 from supabase import create_client
 
-
 # === Config ===
 API_ID = 26024182
 API_HASH = "19af4be4f201f1b2749ef3896c42e089"
@@ -129,90 +128,6 @@ def restricted():
         return bool(data)
 
     return filters.create(decorator_filter)
-
-@app.on_message(filters.command("genkey") & filters.private & filters.user(ADMIN_ID))
-async def manual_genkey_command(client, message):
-    args = message.text.split()
-
-    if len(args) != 2:
-        return await message.reply("❌ Usage: `/genkey <duration>`\nExample: `/genkey 1d`, `/genkey 30m`, `/genkey 12h`", quote=True)
-
-    duration_code = args[1]
-    delta = parse_duration(duration_code)
-    if delta.total_seconds() <= 0:
-        return await message.reply("❌ Invalid duration format. Use `1d`, `12h`, or `30m`.", quote=True)
-
-    try:
-        key = "XENO-" + ''.join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
-        now = datetime.now(timezone.utc)
-        expiry = now + delta
-
-        supabase.table("xeno_keys").insert({
-            "key": key,
-            "expiry": expiry.isoformat(),
-            "redeemed_by": None,
-            "owner_id": ADMIN_ID,
-            "created": now.isoformat(),
-            "duration": duration_code,
-            "banned": False
-        }).execute()
-
-        await message.reply(
-            f"✅ ɴᴇᴡ ᴋᴇʏ ɢᴇɴᴇʀᴀᴛᴇᴅ\n"
-            f"━━━━━━━━━━━━\n"
-            f"🔐 ᴋᴇʏ: `{key}`\n"
-            f"⏳ ᴅᴜʀᴀᴛɪᴏɴ: `{duration_code}`\n"
-            f"📅 ᴇxᴘɪʀᴇꜱ ᴏɴ: `{expiry}`\n\n"
-            f"━━━━━━━━━━━━\n"
-            f"🔑 ʜᴏᴡ ᴛᴏ ʀᴇᴅᴇᴇᴍ\n"
-            f"1. ᴛʏᴘᴇ `/redeem`\n"
-            f"2. ꜱᴇɴᴅ ᴛʜᴇ ᴋᴇʏ: `{key}`"
-        )
-    except Exception as e:
-        print("[ERROR] Failed to insert key:", e)
-        await message.reply("❌ Failed to generate key. Try again later.")
-
-@app.on_message(filters.command("redeem") & filters.private)
-async def redeem_command(client, message):
-    args = message.text.split()
-    if len(args) != 2:
-        return await message.reply("❌ Usage: `/redeem <key>`\nExample: `/redeem XENO-ABC123XYZ9`", quote=True)
-
-    input_key = args[1].strip().upper()
-    user_id = message.from_user.id
-    now = datetime.now(timezone.utc)
-
-    try:
-        response = supabase.table("xeno_keys") \
-            .select("*") \
-            .eq("key", input_key) \
-            .execute()
-
-        if not response.data:
-            return await message.reply("❌ Invalid key.")
-
-        key_data = response.data[0]
-
-        if key_data["redeemed_by"]:
-            return await message.reply("❌ This key has already been redeemed.")
-
-        expiry = datetime.fromisoformat(key_data["expiry"].replace('Z', '+00:00'))
-        if expiry < now:
-            return await message.reply("❌ This key is expired.")
-
-        supabase.table("xeno_keys").update({
-            "redeemed_by": user_id
-        }).eq("key", input_key).execute()
-
-        await message.reply(
-            f"✅ sᴜᴄᴄᴇssғᴜʟʟʏ ʀᴇᴅᴇᴇᴍᴇᴅ ᴋᴇʏ\n"
-            f"🔐 ᴋᴇʏ: `{input_key}`\n"
-            f"⏳ ᴇxᴘɪʀᴇꜱ: `{expiry}`\n\n"
-            f"✅ ʏᴏᴜ ɴᴏᴡ ʜᴀᴠᴇ ᴘʀᴇᴍɪᴜᴍ ᴀᴄᴄᴇss.\nᴛʏᴘᴇ /menu ᴛᴏ ᴠɪᴇᴡ ᴄᴏᴍᴍᴀɴᴅꜱ."
-        )
-    except Exception as e:
-        print("[ERROR] Redeem failed:", e)
-        await message.reply("❌ Something went wrong. Please try again.")
 
 user_state = {}  # Tracks which user is encrypting or decrypting
 MAX_SIZE = 10 * 1024 * 1024  # 10 MB file size limit
@@ -338,5 +253,89 @@ async def decrypt_file(client, message):
     await progress.delete()
     os.remove(path)
     os.remove(out_file)
+    
+@app.on_message(filters.command("genkey") & filters.private & filters.user(ADMIN_ID))
+async def manual_genkey_command(client, message):
+    args = message.text.split()
+
+    if len(args) != 2:
+        return await message.reply("❌ Usage: `/genkey <duration>`\nExample: `/genkey 1d`, `/genkey 30m`, `/genkey 12h`", quote=True)
+
+    duration_code = args[1]
+    delta = parse_duration(duration_code)
+    if delta.total_seconds() <= 0:
+        return await message.reply("❌ Invalid duration format. Use `1d`, `12h`, or `30m`.", quote=True)
+
+    try:
+        key = "XENO-" + ''.join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
+        now = datetime.now(timezone.utc)
+        expiry = now + delta
+
+        supabase.table("xeno_keys").insert({
+            "key": key,
+            "expiry": expiry.isoformat(),
+            "redeemed_by": None,
+            "owner_id": ADMIN_ID,
+            "created": now.isoformat(),
+            "duration": duration_code,
+            "banned": False
+        }).execute()
+
+        await message.reply(
+            f"✅ ɴᴇᴡ ᴋᴇʏ ɢᴇɴᴇʀᴀᴛᴇᴅ\n"
+            f"━━━━━━━━━━━━\n"
+            f"🔐 ᴋᴇʏ: `{key}`\n"
+            f"⏳ ᴅᴜʀᴀᴛɪᴏɴ: `{duration_code}`\n"
+            f"📅 ᴇxᴘɪʀᴇꜱ ᴏɴ: `{expiry}`\n\n"
+            f"━━━━━━━━━━━━\n"
+            f"🔑 ʜᴏᴡ ᴛᴏ ʀᴇᴅᴇᴇᴍ\n"
+            f"1. ᴛʏᴘᴇ `/redeem`\n"
+            f"2. ꜱᴇɴᴅ ᴛʜᴇ ᴋᴇʏ: `{key}`"
+        )
+    except Exception as e:
+        print("[ERROR] Failed to insert key:", e)
+        await message.reply("❌ Failed to generate key. Try again later.")
+
+@app.on_message(filters.command("redeem") & filters.private)
+async def redeem_command(client, message):
+    args = message.text.split()
+    if len(args) != 2:
+        return await message.reply("❌ Usage: `/redeem <key>`\nExample: `/redeem XENO-ABC123XYZ9`", quote=True)
+
+    input_key = args[1].strip().upper()
+    user_id = message.from_user.id
+    now = datetime.now(timezone.utc)
+
+    try:
+        response = supabase.table("xeno_keys") \
+            .select("*") \
+            .eq("key", input_key) \
+            .execute()
+
+        if not response.data:
+            return await message.reply("❌ Invalid key.")
+
+        key_data = response.data[0]
+
+        if key_data["redeemed_by"]:
+            return await message.reply("❌ This key has already been redeemed.")
+
+        expiry = datetime.fromisoformat(key_data["expiry"].replace('Z', '+00:00'))
+        if expiry < now:
+            return await message.reply("❌ This key is expired.")
+
+        supabase.table("xeno_keys").update({
+            "redeemed_by": user_id
+        }).eq("key", input_key).execute()
+
+        await message.reply(
+            f"✅ sᴜᴄᴄᴇssғᴜʟʟʏ ʀᴇᴅᴇᴇᴍᴇᴅ ᴋᴇʏ\n"
+            f"🔐 ᴋᴇʏ: `{input_key}`\n"
+            f"⏳ ᴇxᴘɪʀᴇꜱ: `{expiry}`\n\n"
+            f"✅ ʏᴏᴜ ɴᴏᴡ ʜᴀᴠᴇ ᴘʀᴇᴍɪᴜᴍ ᴀᴄᴄᴇss.\nᴛʏᴘᴇ /menu ᴛᴏ ᴠɪᴇᴡ ᴄᴏᴍᴍᴀɴᴅꜱ."
+        )
+    except Exception as e:
+        print("[ERROR] Redeem failed:", e)
+        await message.reply("❌ Something went wrong. Please try again.")
     
 app.run()
