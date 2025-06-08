@@ -111,59 +111,65 @@ MAX_SIZE = 10 * 1024 * 1024  # 10 MB file size limit
 @app.on_callback_query()
 async def debug_all_callbacks(client, cb):
     print(f"[DEBUG] Callback received: {cb.data} from user {cb.from_user.id}")
-    await cb.answer()  # just answer to remove "loading"
+    await cb.answer()  # Just answer to remove "loading"
 
 # /menu command — shows User Menu
 @app.on_message(filters.command("menu") & filters.private)
 async def show_command(client, message):
     user_id = message.from_user.id
+    print(f"[DEBUG] Menu command received from user {user_id}")  # Debug log
     if not await check_user_access(user_id):
-        return await message.reply("⛔ ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ʀᴇᴅᴇᴇᴍ ᴀ ᴠᴀʟɪᴅ ᴋᴇʏ ꜰɪʀꜱᴛ.")
+        print(f"[DEBUG] User {user_id} does not have access")  # Debug log
+        return await message.reply("⛔ You need to redeem a valid key first.")
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔐 ᴇɴᴄʀʏᴘᴛ", callback_data="menu_encrypt")],
-        [InlineKeyboardButton("🔓 ᴅᴇᴄʀʏᴘᴛ", callback_data="menu_decrypt")],
-        [InlineKeyboardButton("📂 ᴜᴘʟᴏᴀᴅ", callback_data="menu_upload")],
-        [InlineKeyboardButton("🔍 ꜱᴇᴀʀᴄʜ", callback_data="menu_search")],
-        [InlineKeyboardButton("📊 ᴍʏ ɪɴꜰᴏ", callback_data="menu_myinfo")],
-        [InlineKeyboardButton("👥 ʀᴇꜰᴇʀ", callback_data="menu_refer")],
+        [InlineKeyboardButton("🔐 Encrypt", callback_data="menu_encrypt")],
+        [InlineKeyboardButton("🔓 Decrypt", callback_data="menu_decrypt")],
+        [InlineKeyboardButton("📂 Upload", callback_data="menu_upload")],
+        [InlineKeyboardButton("🔍 Search", callback_data="menu_search")],
+        [InlineKeyboardButton("📊 My Info", callback_data="menu_myinfo")],
+        [InlineKeyboardButton("👥 Refer", callback_data="menu_refer")],
     ])
-    await message.reply("♨️ ᙭EᑎO ᑭᖇEᗰIᑌᗰ ᗷOT ♨️\n\n🔹ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅꜱ🔹", reply_markup=keyboard)
+    await message.reply("♨️ XENO PREMIUM BOT ♨️\n\n🔹Available Commands🔹", reply_markup=keyboard)
 
 # Encrypt button callback
 @app.on_callback_query(filters.regex("^menu_encrypt$") & restricted())
 async def cb_encrypt(client, cb):
-    print(f"Encrypt callback triggered for user {cb.from_user.id}")  # Debug log
-    await cb.answer()
+    print(f"[DEBUG] Encrypt callback triggered for user {cb.from_user.id}")  # Debug log
+    await cb.answer("You selected Encrypt.")
     user_state[cb.from_user.id] = "encrypt"
-    print(f"User state updated: {user_state}")  # Debug log
+    print(f"[DEBUG] User state updated: {user_state}")  # Debug log
     await cb.message.reply("📂 Send a `.py` or `.txt` file (max 10MB) to encrypt.")
 
 # Decrypt button callback
 @app.on_callback_query(filters.regex("^menu_decrypt$") & restricted())
 async def cb_decrypt(client, cb):
-    await cb.answer()
+    print(f"[DEBUG] Decrypt callback triggered for user {cb.from_user.id}")  # Debug log
+    await cb.answer("You selected Decrypt.")
     user_state[cb.from_user.id] = "decrypt"
-    await cb.message.reply("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
+    print(f"[DEBUG] User state updated: {user_state}")  # Debug log
+    await cb.message.reply("📂 Send the encrypted `.py` or `.txt` file to decrypt.")
 
 # Encrypt command
 @app.on_message(filters.command("encrypt") & filters.private & restricted())
 async def encrypt_command(client, message):
+    print(f"[DEBUG] Encrypt command received from user {message.from_user.id}")  # Debug log
     user_state[message.from_user.id] = "encrypt"
-    await message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
+    await message.reply("📂 Send a `.py` or `.txt` file (max 10MB) to encrypt.")
 
 # Decrypt command
 @app.on_message(filters.command("decrypt") & filters.private & restricted())
 async def decrypt_command(client, message):
+    print(f"[DEBUG] Decrypt command received from user {message.from_user.id}")  # Debug log
     user_state[message.from_user.id] = "decrypt"
-    await message.reply("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
+    await message.reply("📂 Send the encrypted `.py` or `.txt` file to decrypt.")
 
 # File handler
 @app.on_message(filters.document & filters.private)
 async def handle_uploaded_file(client, message: Message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
-    print(f"File received from user {user_id} with state {state}")  # Debug log
+    print(f"[DEBUG] File received from user {user_id} with state {state}")  # Debug log
     if not state:
         return await message.reply("⚠️ Please choose encrypt or decrypt first using /menu.")
 
@@ -175,19 +181,20 @@ async def handle_uploaded_file(client, message: Message):
 # Encryption logic
 async def encrypt_file(client, message):
     user_id = message.from_user.id
+    print(f"[DEBUG] Encrypting file for user {user_id}")  # Debug log
     user_state.pop(user_id, None)
 
     doc = message.document
     file_name = doc.file_name
 
     if not (file_name.endswith(".py") or file_name.endswith(".txt")):
-        return await message.reply("❌ ᴏɴʟʏ `.py` ᴏʀ `.txt` ꜰɪʟᴇꜱ ᴀʀᴇ ᴀʟʟᴏᴡᴇᴅ.")
+        return await message.reply("❌ Only `.py` or `.txt` files are allowed.")
     if doc.file_size > MAX_SIZE:
-        return await message.reply("❌ ꜰɪʟᴇ ᴛᴏᴏ ʟᴀʀɢᴇ. ᴍᴀx ꜱɪᴢᴇ ɪꜱ 10ᴍʙ.")
+        return await message.reply("❌ File too large. Max size is 10MB.")
 
-    progress = await message.reply("⏳ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ...")
+    progress = await message.reply("⏳ Downloading...")
     path = await client.download_media(message)
-    await progress.edit("🔐 ᴇɴᴄʀʏᴘᴛɪɴɢ...")
+    await progress.edit("🔐 Encrypting...")
 
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -195,7 +202,8 @@ async def encrypt_file(client, message):
         encoded = base64.b64encode(raw.encode()).decode()
         encrypted = f"import base64\nexec(base64.b64decode('{encoded}').decode('utf-8'))\n"
     except Exception as e:
-        await progress.edit(f"❌ ᴇɴᴄʀʏᴘᴛɪᴏɴ ꜰᴀɪʟᴇᴅ: {e}")
+        print(f"[DEBUG] Encryption failed for user {user_id}: {e}")  # Debug log
+        await progress.edit(f"❌ Encryption failed: {e}")
         os.remove(path)
         return
 
@@ -203,7 +211,7 @@ async def encrypt_file(client, message):
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(encrypted)
 
-    await client.send_document(message.chat.id, document=out_file, caption="✅ ᴇɴᴄʀʏᴘᴛᴇᴅ ꜰɪʟᴇ ʀᴇᴀᴅʏ.")
+    await client.send_document(message.chat.id, document=out_file, caption="✅ Encrypted file ready.")
     await progress.delete()
     os.remove(path)
     os.remove(out_file)
@@ -211,29 +219,31 @@ async def encrypt_file(client, message):
 # Decryption logic
 async def decrypt_file(client, message):
     user_id = message.from_user.id
+    print(f"[DEBUG] Decrypting file for user {user_id}")  # Debug log
     user_state.pop(user_id, None)
 
     doc = message.document
     file_name = doc.file_name
 
     if not (file_name.endswith(".py") or file_name.endswith(".txt")):
-        return await message.reply("❌ ᴏɴʟʏ `.py` ᴏʀ `.txt` ꜰɪʟᴇꜱ ᴀʀᴇ ᴀʟʟᴏᴡᴇᴅ.")
+        return await message.reply("❌ Only `.py` or `.txt` files are allowed.")
     if doc.file_size > MAX_SIZE:
-        return await message.reply("❌ ꜰɪʟᴇ ᴛᴏᴏ ʟᴀʀɢᴇ. ᴍᴀx ꜱɪᴢᴇ ɪꜱ 10ᴍʙ.")
+        return await message.reply("❌ File too large. Max size is 10MB.")
 
-    progress = await message.reply("⏳ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ...")
+    progress = await message.reply("⏳ Downloading...")
     path = await client.download_media(message)
-    await progress.edit("🔓 ᴅᴇᴄʀʏᴘᴛɪɴɢ...")
+    await progress.edit("🔓 Decrypting...")
 
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
         match = re.search(r"base64\.b64decode\('(.+?)'\)", content)
         if not match:
-            raise ValueError("ᴇɴᴄʀʏᴘᴛᴇᴅ ᴄᴏɴᴛᴇɴᴛ ɴᴏᴛ ꜰᴏᴜɴᴅ.")
+            raise ValueError("Encrypted content not found.")
         decoded = base64.b64decode(match.group(1)).decode("utf-8")
     except Exception as e:
-        await progress.edit(f"❌ ᴅᴇᴄʀʏᴘᴛɪᴏɴ ꜰᴀɪʟᴇᴅ: {e}")
+        print(f"[DEBUG] Decryption failed for user {user_id}: {e}")  # Debug log
+        await progress.edit(f"❌ Decryption failed: {e}")
         os.remove(path)
         return
 
@@ -241,7 +251,7 @@ async def decrypt_file(client, message):
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(decoded)
 
-    await client.send_document(message.chat.id, document=out_file, caption="✅ ᴅᴇᴄʀʏᴘᴛᴇᴅ ꜰɪʟᴇ ʀᴇᴀᴅʏ.")
+    await client.send_document(message.chat.id, document=out_file, caption="✅ Decrypted file ready.")
     await progress.delete()
     os.remove(path)
     os.remove(out_file)
