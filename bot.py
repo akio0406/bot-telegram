@@ -132,6 +132,11 @@ def restricted():
 user_state = {}  # Tracks which user is encrypting or decrypting
 MAX_SIZE = 10 * 1024 * 1024  # 10 MB file size limit
 
+@app.on_callback_query()
+async def debug_all_callbacks(client, cb):
+    print(f"[DEBUG] Callback received: {cb.data} from user {cb.from_user.id}")
+    await cb.answer("Callback received!")
+
 # /menu command — shows User Menu
 @app.on_message(filters.command("menu") & filters.private)
 async def show_command(client, message):
