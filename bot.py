@@ -133,9 +133,11 @@ async def show_command(client, message):
 # Encrypt button callback
 @app.on_callback_query(filters.regex("^menu_encrypt$") & restricted())
 async def cb_encrypt(client, cb):
+    print(f"Encrypt callback triggered for user {cb.from_user.id}")  # Debug log
     await cb.answer()
     user_state[cb.from_user.id] = "encrypt"
-    await cb.message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
+    print(f"User state updated: {user_state}")  # Debug log
+    await cb.message.reply("📂 Send a `.py` or `.txt` file (max 10MB) to encrypt.")
 
 # Decrypt button callback
 @app.on_callback_query(filters.regex("^menu_decrypt$") & restricted())
@@ -161,8 +163,9 @@ async def decrypt_command(client, message):
 async def handle_uploaded_file(client, message: Message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
+    print(f"File received from user {user_id} with state {state}")  # Debug log
     if not state:
-        return await message.reply("⚠️ ᴘʟᴇᴀꜱᴇ ᴄʜᴏᴏꜱᴇ ᴇɴᴄʀʏᴘᴛ ᴏʀ ᴅᴇᴄʀʏᴘᴛ ꜰɪʀꜱᴛ ᴜꜱɪɴɢ /menu.")
+        return await message.reply("⚠️ Please choose encrypt or decrypt first using /menu.")
 
     if state == "encrypt":
         await encrypt_file(client, message)
