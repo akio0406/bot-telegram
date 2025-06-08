@@ -238,7 +238,6 @@ import base64
 import re
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from config import MAX_SIZE
 
 user_state = {}
 MAX_SIZE = 10485760  # example max size in bytes (10 MB)
