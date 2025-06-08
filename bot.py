@@ -79,7 +79,7 @@ async def check_user_access(user_id):
             .eq("redeemed_by", user_id) \
             .eq("banned", False) \
             .execute()
-        
+
         rows = response.data
         if not rows:
             return False
@@ -109,13 +109,12 @@ def parse_duration(code):
 
 def restricted():
     async def decorator_filter(client, update, _=None):
-        # Determine user ID based on update type
-        if isinstance(update, Message):
-            user_id = update.from_user.id
-        elif isinstance(update, CallbackQuery):
-            user_id = update.from_user.id
-        else:
-            return False  # Unknown type or no user
+        user_id = (
+            update.from_user.id
+            if isinstance(update, (Message, CallbackQuery)) else None
+        )
+        if not user_id:
+            return False
 
         def query():
             res = supabase.from_("xeno_keys") \
@@ -234,11 +233,7 @@ async def show_command(client, message, edit=False, from_id=None):
         [InlineKeyboardButton("🔍 ꜱᴇᴀʀᴄʜ", callback_data="menu_search")],
         [InlineKeyboardButton("🔙 ʙᴀᴄᴋ ᴛᴏ ᴀᴅᴍɪɴ ᴄᴏᴍᴍᴀɴᴅꜱ", callback_data="admin_menu")]
     ])
-
-    await message.reply(
-        "♨️ ᙭EᑎO ᑭᖇEᗰIᑌᗰ ᗷOT ♨️\n\n🔹ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅꜱ🔹",
-        reply_markup=keyboard
-    )
+    await message.reply("♨️ ᙭EᑎO ᑭᖇEᗰIᑌᗰ ᗷOT ♨️\n\n🔹ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅꜱ🔹", reply_markup=keyboard)
 
 @app.on_callback_query(filters.regex("^admin_menu$"))
 async def show_admin_buttons(client, cb):
@@ -272,16 +267,16 @@ MAX_SIZE = 10485760  # example max size in bytes (10 MB)
 @app.on_message(filters.command("encrypt") & filters.private & restricted())
 async def encrypt_command(client, message):
     user_state[message.from_user.id] = "encrypt"
-    await message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
+    await cb.message.edit_text("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
 
 @app.on_message(filters.command("decrypt") & filters.private & restricted())
 async def decrypt_command(client, message):
     user_state[message.from_user.id] = "decrypt"
-    await message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛʜᴀᴛ ᴡᴀꜱ ᴇɴᴄʀʏᴘᴛᴇᴅ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ ɪᴛ.")
+    await cb.message.edit_text("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
 
 @app.on_callback_query(filters.regex("^menu_encrypt$") & restricted())
 async def cb_encrypt(client, cb):
-    await cb.answer()  # ✅ Acknowledge the callback
+    await cb.answer()
     if not await check_user_access(cb.from_user.id):
         return await cb.answer("⛔ ɴᴏ ᴀᴄᴄᴇꜱꜱ. ᴘʟᴇᴀꜱᴇ ʀᴇᴅᴇᴇᴍ ᴀ ᴋᴇʏ.", show_alert=True)
     user_state[cb.from_user.id] = "encrypt"
@@ -289,12 +284,24 @@ async def cb_encrypt(client, cb):
 
 @app.on_callback_query(filters.regex("^menu_decrypt$") & restricted())
 async def cb_decrypt(client, cb):
-    await cb.answer()  # ✅ Acknowledge the callback
+    await cb.answer()
     if not await check_user_access(cb.from_user.id):
         return await cb.answer("⛔ ɴᴏ ᴀᴄᴄᴇꜱꜱ. ᴘʟᴇᴀꜱᴇ ʀᴇᴅᴇᴇᴍ ᴀ ᴋᴇʏ.", show_alert=True)
     user_state[cb.from_user.id] = "decrypt"
     await cb.message.reply("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ .py ᴏʀ .txt ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
 
+# Command Handlers
+@app.on_message(filters.command("encrypt") & filters.private & restricted())
+async def encrypt_command(client, message):
+    user_state[message.from_user.id] = "encrypt"
+    await message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
+
+@app.on_message(filters.command("decrypt") & filters.private & restricted())
+async def decrypt_command(client, message):
+    user_state[message.from_user.id] = "decrypt"
+    await message.reply("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
+
+# File Upload Handler
 @app.on_message(filters.document)
 async def handle_uploaded_file(client, message: Message):
     user_id = message.from_user.id
@@ -305,6 +312,7 @@ async def handle_uploaded_file(client, message: Message):
     elif state == "decrypt":
         await decrypt_file(client, message)
 
+# Encryption Logic
 async def encrypt_file(client, message):
     user_id = message.from_user.id
     user_state.pop(user_id, None)
@@ -325,7 +333,7 @@ async def encrypt_file(client, message):
     encoded = base64.b64encode(raw.encode()).decode()
     encrypted = f"import base64\nexec(base64.b64decode('{encoded}').decode('utf-8'))\n"
 
-    out_file = f"ᴇɴᴄʀʏᴘᴛᴇᴅ_{file_name}"
+    out_file = f"encrypted_{file_name}"
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(encrypted)
 
@@ -334,6 +342,7 @@ async def encrypt_file(client, message):
     os.remove(path)
     os.remove(out_file)
 
+# Decryption Logic
 async def decrypt_file(client, message):
     user_id = message.from_user.id
     user_state.pop(user_id, None)
@@ -362,11 +371,11 @@ async def decrypt_file(client, message):
         os.remove(path)
         return await progress.edit(f"❌ ᴅᴇᴄʀʏᴘᴛɪᴏɴ ꜰᴀɪʟᴇᴅ: {e}")
 
-    out_file = f"ᴅᴇᴄʀʏᴘᴛᴇᴅ_{file_name}"
+    out_file = f"decrypted_{file_name}"
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(decoded)
 
-    await client.send_document(message.chat.id, document=out_file, caption="✅ ᴅᴇᴄʀʏᴘᴛᴇᴅ ꜰɪʟᴇ ɪꜱ ʀᴇᴀᴅʏ.")
+    await client.send_document(message.chat.id, document=out_file, caption="✅ ᴅᴇᴄʀʏᴘᴛᴇᴅ ꜰɪʟᴇ ʀᴇᴀᴅʏ.")
     await progress.delete()
     os.remove(path)
     os.remove(out_file)
