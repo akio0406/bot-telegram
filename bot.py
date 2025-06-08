@@ -216,93 +216,49 @@ async def redeem_command(client, message):
 
 # /menu command — shows User Menu
 @app.on_message(filters.command("menu") & filters.private)
-async def show_command(client, message, edit=False, from_id=None):
-    user_id = from_id or message.from_user.id
+async def show_command(client, message):
+    user_id = message.from_user.id
     if not await check_user_access(user_id):
         return await message.reply("⛔ ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ʀᴇᴅᴇᴇᴍ ᴀ ᴠᴀʟɪᴅ ᴋᴇʏ ꜰɪʀꜱᴛ.")
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔐 ᴇɴᴄʀʏᴘᴛ", callback_data="menu_encrypt")],
         [InlineKeyboardButton("🔓 ᴅᴇᴄʀʏᴘᴛ", callback_data="menu_decrypt")],
-        [InlineKeyboardButton("🧹 ʀᴇᴍᴏᴠᴇ ᴜʀʟꜱ", callback_data="menu_removeurl")],
-        [InlineKeyboardButton("🧹 ʀᴇᴍᴏᴠᴇ ᴅᴜᴘʟɪᴄᴀᴛᴇꜱ", callback_data="menu_removedupe")],
-        [InlineKeyboardButton("📂 ᴍᴇʀɢᴇ ꜰɪʟᴇꜱ", callback_data="menu_merge")],
-        [InlineKeyboardButton("📊 ᴄᴏᴜɴᴛ ʟɪɴᴇꜱ", callback_data="menu_countlines")],
-        [InlineKeyboardButton("🔎 ɢᴇɴᴇʀᴀᴛᴇ", callback_data="gen_menu")],
-        [InlineKeyboardButton("📌 ᴋᴇʏ ꜱᴛᴀᴛᴜꜱ", callback_data="menu_status")],
+        [InlineKeyboardButton("📂 ᴜᴘʟᴏᴀᴅ", callback_data="menu_upload")],
         [InlineKeyboardButton("🔍 ꜱᴇᴀʀᴄʜ", callback_data="menu_search")],
-        [InlineKeyboardButton("🔙 ʙᴀᴄᴋ ᴛᴏ ᴀᴅᴍɪɴ ᴄᴏᴍᴍᴀɴᴅꜱ", callback_data="admin_menu")]
+        [InlineKeyboardButton("📊 ᴍʏ ɪɴꜰᴏ", callback_data="menu_myinfo")],
+        [InlineKeyboardButton("👥 ʀᴇꜰᴇʀ", callback_data="menu_refer")],
     ])
     await message.reply("♨️ ᙭EᑎO ᑭᖇEᗰIᑌᗰ ᗷOT ♨️\n\n🔹ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅꜱ🔹", reply_markup=keyboard)
 
-@app.on_callback_query(filters.regex("^admin_menu$"))
-async def show_admin_buttons(client, cb):
-    if cb.from_user.id != ADMIN_ID:
-        return await cb.answer("⛔ ᴀᴅᴍɪɴ ᴏɴʟʏ.", show_alert=True)
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔑 ɢᴇɴᴇʀᴀᴛᴇ ᴋᴇʏ", callback_data="admin_genkey")],
-        [InlineKeyboardButton("🗑 ᴅᴇʟᴇᴛᴇ ᴋᴇʏ", callback_data="admin_deletekey")],
-        [InlineKeyboardButton("📆 ʀᴇᴍᴏᴠᴇ ᴇxᴘɪʀᴇᴅ ᴋᴇʏꜱ", callback_data="admin_remove_expired")],
-        [InlineKeyboardButton("📊 ꜱʜᴏᴡ ꜱᴛᴀᴛɪꜱᴛɪᴄꜱ", callback_data="admin_stats")],
-        [InlineKeyboardButton("⏳ ᴇxᴛᴇɴᴅ ᴋᴇʏ", callback_data="admin_extendkey")],
-        [InlineKeyboardButton("🚫 ʙᴀɴ ᴜꜱᴇʀ", callback_data="admin_ban")],
-        [InlineKeyboardButton("✅ ᴜɴʙᴀɴ ᴜꜱᴇʀ", callback_data="admin_unban")],
-        [InlineKeyboardButton("📋 ᴠɪᴇᴡ ʙᴀɴʟɪꜱᴛ", callback_data="admin_banlist")],
-        [InlineKeyboardButton("🗑 ᴅᴇʟᴇᴛᴇ ᴀʟʟ ᴋᴇʏꜱ", callback_data="admin_deleteall")],
-        [InlineKeyboardButton("🎁 ɢʀᴀɴᴛ ᴀᴄᴄᴇꜱꜱ", callback_data="admin_grant")],
-        [InlineKeyboardButton("🔁 ᴛʀᴀɴꜱꜰᴇʀ ᴋᴇʏ", callback_data="admin_transfer")],
-        [InlineKeyboardButton("📢 ꜱᴇɴᴅ ᴀɴɴᴏᴜɴᴄᴇᴍᴇɴᴛ", callback_data="admin_announce")],
-        [InlineKeyboardButton("🔙 ʙᴀᴄᴋ ᴛᴏ ᴜꜱᴇʀ ᴍᴇɴᴜ", callback_data="user_menu")]
-    ])
-
-    await cb.message.edit_text(
-        "👑 **ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ** 👑\n\nᴘʟᴇᴀꜱᴇ ᴄʜᴏᴏꜱᴇ ᴀɴ ᴀᴄᴛɪᴏɴ ʙᴇʟᴏᴡ:",
-        reply_markup=keyboard
-    )
-    
-user_state = {}
-MAX_SIZE = 10485760  # example max size in bytes (10 MB)
-
-@app.on_message(filters.command("encrypt") & filters.private & restricted())
-async def encrypt_command(client, message):
-    user_state[message.from_user.id] = "encrypt"
-    await cb.message.edit_text("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
-
-@app.on_message(filters.command("decrypt") & filters.private & restricted())
-async def decrypt_command(client, message):
-    user_state[message.from_user.id] = "decrypt"
-    await cb.message.edit_text("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
-
+# Encrypt button
 @app.on_callback_query(filters.regex("^menu_encrypt$") & restricted())
 async def cb_encrypt(client, cb):
     await cb.answer()
-    if not await check_user_access(cb.from_user.id):
-        return await cb.answer("⛔ ɴᴏ ᴀᴄᴄᴇꜱꜱ. ᴘʟᴇᴀꜱᴇ ʀᴇᴅᴇᴇᴍ ᴀ ᴋᴇʏ.", show_alert=True)
     user_state[cb.from_user.id] = "encrypt"
-    await cb.message.reply("📂 ꜱᴇɴᴅ ᴀ .py ᴏʀ .txt ꜰɪʟᴇ ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
+    await cb.message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
 
+# Decrypt button
 @app.on_callback_query(filters.regex("^menu_decrypt$") & restricted())
 async def cb_decrypt(client, cb):
     await cb.answer()
-    if not await check_user_access(cb.from_user.id):
-        return await cb.answer("⛔ ɴᴏ ᴀᴄᴄᴇꜱꜱ. ᴘʟᴇᴀꜱᴇ ʀᴇᴅᴇᴇᴍ ᴀ ᴋᴇʏ.", show_alert=True)
     user_state[cb.from_user.id] = "decrypt"
-    await cb.message.reply("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ .py ᴏʀ .txt ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
+    await cb.message.reply("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
 
-# Command Handlers
+# Encrypt command
 @app.on_message(filters.command("encrypt") & filters.private & restricted())
 async def encrypt_command(client, message):
     user_state[message.from_user.id] = "encrypt"
     await message.reply("📂 ꜱᴇɴᴅ ᴀ `.py` ᴏʀ `.txt` ꜰɪʟᴇ (ᴍᴀx 10ᴍʙ) ᴛᴏ ᴇɴᴄʀʏᴘᴛ.")
 
+# Decrypt command
 @app.on_message(filters.command("decrypt") & filters.private & restricted())
 async def decrypt_command(client, message):
     user_state[message.from_user.id] = "decrypt"
     await message.reply("📂 ꜱᴇɴᴅ ᴛʜᴇ ᴇɴᴄʀʏᴘᴛᴇᴅ `.py` ᴏʀ `.txt` ꜰɪʟᴇ ᴛᴏ ᴅᴇᴄʀʏᴘᴛ.")
 
-# File Upload Handler
-@app.on_message(filters.document)
+# File handler
+@app.on_message(filters.document & filters.private)
 async def handle_uploaded_file(client, message: Message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -312,7 +268,7 @@ async def handle_uploaded_file(client, message: Message):
     elif state == "decrypt":
         await decrypt_file(client, message)
 
-# Encryption Logic
+# Encryption logic
 async def encrypt_file(client, message):
     user_id = message.from_user.id
     user_state.pop(user_id, None)
@@ -342,7 +298,7 @@ async def encrypt_file(client, message):
     os.remove(path)
     os.remove(out_file)
 
-# Decryption Logic
+# Decryption logic
 async def decrypt_file(client, message):
     user_id = message.from_user.id
     user_state.pop(user_id, None)
