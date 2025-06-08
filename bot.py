@@ -133,6 +133,7 @@ async def show_command(client, message):
     await message.reply("♨️ XENO PREMIUM BOT ♨️\n\n🔹Available Commands🔹", reply_markup=keyboard)
 
 # Encrypt button callback
+# Encrypt button callback
 @app.on_callback_query(filters.regex("^menu_encrypt$") & restricted())
 async def cb_encrypt(client, cb):
     print(f"[DEBUG] Encrypt callback triggered for user {cb.from_user.id}")  # Debug log
