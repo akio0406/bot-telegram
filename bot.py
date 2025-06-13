@@ -110,16 +110,22 @@ async def menu_cmd(_, m: Message):
     await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
 
 # — Encrypt button —
+# — Encrypt button —
 @app.on_callback_query(filters.regex("^menu_encrypt$"))
 async def on_encrypt_cb(bot: Client, cq: CallbackQuery):
     uid = cq.from_user.id
     print(f"[HANDLER] Encrypt button pressed by {uid}")
     await cq.answer("Encrypt mode activated!")
+    # ◀─ Clear the buttons from the original /menu message
+    await cq.message.edit_reply_markup(None)
+
     if not await check_user_access(uid):
         return await cq.message.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
+
     user_state[uid] = "encrypt"
     await cq.message.reply("📂 Send a `.py` or `.txt` file (max 10MB) to encrypt.")
     print(f"[HANDLER] Encrypt prompt sent to {uid}")
+
 
 # — Decrypt button —
 @app.on_callback_query(filters.regex("^menu_decrypt$"))
@@ -127,8 +133,12 @@ async def on_decrypt_cb(bot: Client, cq: CallbackQuery):
     uid = cq.from_user.id
     print(f"[HANDLER] Decrypt button pressed by {uid}")
     await cq.answer("Decrypt mode activated!")
+    # ◀─ Clear the buttons from the original /menu message
+    await cq.message.edit_reply_markup(None)
+
     if not await check_user_access(uid):
         return await cq.message.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
+
     user_state[uid] = "decrypt"
     await cq.message.reply("📂 Send an encrypted `.py` or `.txt` file to decrypt.")
     print(f"[HANDLER] Decrypt prompt sent to {uid}")
