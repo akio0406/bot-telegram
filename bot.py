@@ -110,7 +110,7 @@ async def menu_cmd(_, m: Message):
     await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
 
 # — Encrypt button —
-@app.on_callback_query(filters.regex("^menu_encrypt$") & filters.private)
+@app.on_callback_query(filters.regex("^menu_encrypt$"))
 async def on_encrypt_cb(bot: Client, cq: CallbackQuery):
     uid = cq.from_user.id
     print(f"[HANDLER] Encrypt button pressed by {uid}")
@@ -122,7 +122,7 @@ async def on_encrypt_cb(bot: Client, cq: CallbackQuery):
     print(f"[HANDLER] Encrypt prompt sent to {uid}")
 
 # — Decrypt button —
-@app.on_callback_query(filters.regex("^menu_decrypt$") & filters.private)
+@app.on_callback_query(filters.regex("^menu_decrypt$"))
 async def on_decrypt_cb(bot: Client, cq: CallbackQuery):
     uid = cq.from_user.id
     print(f"[HANDLER] Decrypt button pressed by {uid}")
