@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-import os, sys, re, random, base64, asyncio
+import os
+import sys
+import re
+import random
+import base64
+import asyncio
+
 from datetime import datetime, timedelta, timezone
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -14,7 +20,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # — Fail fast on missing ENV —
-missing = [n for n,v in [
+missing = [n for n, v in [
     ("API_ID", API_ID),
     ("API_HASH", API_HASH),
     ("BOT_TOKEN", BOT_TOKEN),
@@ -31,15 +37,24 @@ try:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     supabase.table("xeno_keys").select("key").limit(1).execute()
     print("[OK] Supabase connection established")
+except SupabaseException as e:
+    print(f"[FATAL] Supabase refused key: {e}")
+    sys.exit(1)
 except Exception as e:
-    print(f"[FATAL] Could not connect to Supabase: {e}")
+    print(f"[FATAL] Unexpected Supabase error: {e}")
     sys.exit(1)
 
 # — Init Bot —
-app = Client("xeno_premium_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client(
+    "xeno_premium_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+)
 
+# — Constants & State —
 MAX_SIZE   = 10 * 1024 * 1024  # 10MB
-user_state = {}                # { user_id: "encrypt"|"decrypt" }
+user_state = {}                # user_id → "encrypt" or "decrypt"
 
 # — Helpers —
 def parse_duration(code: str) -> timedelta:
@@ -53,7 +68,7 @@ def parse_duration(code: str) -> timedelta:
         return timedelta()
 
 async def check_user_access(uid: int) -> bool:
-    """Return True if user has any non-expired, non-banned key."""
+    """Return True if user has any valid (non-banned, non-expired) key."""
     now = datetime.now(timezone.utc)
     try:
         resp = supabase.table("xeno_keys") \
@@ -61,45 +76,32 @@ async def check_user_access(uid: int) -> bool:
             .eq("redeemed_by", uid) \
             .eq("banned", False) \
             .execute()
-        for row in resp.data or []:
-            exp = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
-            if exp > now:
+        for row in (resp.data or []):
+            expiry = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
+            if expiry > now:
                 return True
     except Exception as e:
         print(f"[ERROR] access check failed for {uid}: {e}")
     return False
-
-# — Catch *all* button clicks, log + guard —
-@app.on_callback_query()
-async def _all_cq_handler(bot: Client, cq: CallbackQuery):
-    data = cq.data or "<no-data>"
-    uid  = cq.from_user.id
-    print(f"[CQ] User {uid} pressed `{data}`")
-    # remove spinner
-    await cq.answer()
-
-    # guard encrypt/decrypt buttons
-    if data in ("menu_encrypt", "menu_decrypt"):
-        if not await check_user_access(uid):
-            return await cq.message.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
-
-    # let the specific handlers run below
 
 # — /start —
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(_, m: Message):
     uid = m.from_user.id
     if await check_user_access(uid):
-        return await m.reply("✅ You already have access! Type /menu to see commands.")
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔑 Buy Key", url="https://t.me/@xeeeenooo1")]])
-    await m.reply("👋 You need a premium key. Buy one below:", reply_markup=kb)
+        await m.reply("✅ Welcome back! Use /menu to see commands.")
+    else:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔑 Buy Key", url="https://t.me/@xeeeenooo1")]
+        ])
+        await m.reply("👋 You need a premium key. Buy one below:", reply_markup=kb)
 
 # — /menu —
 @app.on_message(filters.command("menu") & filters.private)
 async def menu_cmd(_, m: Message):
     uid = m.from_user.id
     if not await check_user_access(uid):
-        return await m.reply("⛔ You need a valid key. Redeem with `/redeem <key>`.")
+        return await m.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔐 Encrypt", callback_data="menu_encrypt")],
         [InlineKeyboardButton("🔓 Decrypt", callback_data="menu_decrypt")],
@@ -107,19 +109,31 @@ async def menu_cmd(_, m: Message):
     ])
     await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
 
-# — Encrypt button pressed —
-@app.on_callback_query(filters.regex("^menu_encrypt$"))
-async def on_encrypt_cb(_, cq: CallbackQuery):
-    user_state[cq.from_user.id] = "encrypt"
+# — Encrypt button —
+@app.on_callback_query(filters.regex("^menu_encrypt$") & filters.private)
+async def on_encrypt_cb(bot: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    print(f"[HANDLER] Encrypt button pressed by {uid}")
+    await cq.answer("Encrypt mode activated!")
+    if not await check_user_access(uid):
+        return await cq.message.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
+    user_state[uid] = "encrypt"
     await cq.message.reply("📂 Send a `.py` or `.txt` file (max 10MB) to encrypt.")
+    print(f"[HANDLER] Encrypt prompt sent to {uid}")
 
-# — Decrypt button pressed —
-@app.on_callback_query(filters.regex("^menu_decrypt$"))
-async def on_decrypt_cb(_, cq: CallbackQuery):
-    user_state[cq.from_user.id] = "decrypt"
+# — Decrypt button —
+@app.on_callback_query(filters.regex("^menu_decrypt$") & filters.private)
+async def on_decrypt_cb(bot: Client, cq: CallbackQuery):
+    uid = cq.from_user.id
+    print(f"[HANDLER] Decrypt button pressed by {uid}")
+    await cq.answer("Decrypt mode activated!")
+    if not await check_user_access(uid):
+        return await cq.message.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
+    user_state[uid] = "decrypt"
     await cq.message.reply("📂 Send an encrypted `.py` or `.txt` file to decrypt.")
+    print(f"[HANDLER] Decrypt prompt sent to {uid}")
 
-# — `/encrypt` & `/decrypt` commands as fallback —
+# — Fallback commands —
 @app.on_message(filters.command("encrypt") & filters.private)
 async def cmd_encrypt(_, m: Message):
     user_state[m.from_user.id] = "encrypt"
@@ -133,7 +147,8 @@ async def cmd_decrypt(_, m: Message):
 # — File handler —
 @app.on_message(filters.document & filters.private)
 async def file_handler(bot: Client, m: Message):
-    mode = user_state.pop(m.from_user.id, None)
+    uid  = m.from_user.id
+    mode = user_state.pop(uid, None)
     if not mode:
         return await m.reply("⚠️ First choose Encrypt or Decrypt via /menu.")
     if mode == "encrypt":
@@ -141,72 +156,65 @@ async def file_handler(bot: Client, m: Message):
     else:
         await do_decrypt(bot, m)
 
-# — Encryption logic —
 async def do_encrypt(bot: Client, m: Message):
     doc = m.document
     if not doc.file_name.lower().endswith((".py", ".txt")):
         return await m.reply("❌ Only `.py` or `.txt` files are allowed.")
     if doc.file_size > MAX_SIZE:
-        return await m.reply("❌ File too large. Max size is 10MB.")
-
+        return await m.reply("❌ File too large (max 10MB).")
     prog = await m.reply("⏳ Downloading...")
     path = await bot.download_media(m)
     await prog.edit("🔐 Encrypting...")
-
     try:
         raw = open(path, "r", encoding="utf-8", errors="ignore").read()
         b64 = base64.b64encode(raw.encode()).decode()
-        output = f"import base64\nexec(base64.b64decode('{b64}').decode('utf-8'))\n"
-        fn = f"encrypted_{doc.file_name}"
-        with open(fn, "w", encoding="utf-8") as f:
-            f.write(output)
-        await bot.send_document(m.chat.id, fn, caption="✅ Encrypted file ready.")
+        payload = f"import base64\nexec(base64.b64decode('{b64}').decode('utf-8'))\n"
+        out_fn = f"encrypted_{doc.file_name}"
+        with open(out_fn, "w", encoding="utf-8") as f:
+            f.write(payload)
+        await bot.send_document(m.chat.id, out_fn, caption="✅ Encrypted file ready.")
     except Exception as e:
         await prog.edit(f"❌ Encryption error: {e}")
     finally:
         await prog.delete()
         os.remove(path)
-        if os.path.exists(fn): os.remove(fn)
+        if os.path.exists(out_fn): os.remove(out_fn)
 
-# — Decryption logic —
 async def do_decrypt(bot: Client, m: Message):
     doc = m.document
     if not doc.file_name.lower().endswith((".py", ".txt")):
         return await m.reply("❌ Only `.py` or `.txt` files are allowed.")
     if doc.file_size > MAX_SIZE:
-        return await m.reply("❌ File too large. Max size is 10MB.")
-
+        return await m.reply("❌ File too large (max 10MB).")
     prog = await m.reply("⏳ Downloading...")
     path = await bot.download_media(m)
     await prog.edit("🔓 Decrypting...")
-
     try:
         content = open(path, "r", encoding="utf-8", errors="ignore").read()
         mobj    = re.search(r"base64\.b64decode\('(.+?)'\)", content)
         if not mobj:
-            raise ValueError("No encrypted payload.")
-        dec = base64.b64decode(mobj.group(1)).decode("utf-8")
-        fn  = f"decrypted_{doc.file_name}"
-        with open(fn, "w", encoding="utf-8") as f:
-            f.write(dec)
-        await bot.send_document(m.chat.id, fn, caption="✅ Decrypted file ready.")
+            raise ValueError("No encrypted payload found.")
+        decoded = base64.b64decode(mobj.group(1)).decode("utf-8")
+        out_fn  = f"decrypted_{doc.file_name}"
+        with open(out_fn, "w", encoding="utf-8") as f:
+            f.write(decoded)
+        await bot.send_document(m.chat.id, out_fn, caption="✅ Decrypted file ready.")
     except Exception as e:
         await prog.edit(f"❌ Decryption error: {e}")
     finally:
         await prog.delete()
         os.remove(path)
-        if os.path.exists(fn): os.remove(fn)
+        if os.path.exists(out_fn): os.remove(out_fn)
 
-# — Admin: /genkey or /generate —
+# — Admin: /genkey & /generate —
 @app.on_message(filters.command(["genkey","generate"]) & filters.private & filters.user(ADMIN_ID))
 async def genkey_cmd(_, m: Message):
-    parts = m.text.split()
+    parts = m.text.strip().split()
     if len(parts) != 2:
         return await m.reply("❌ Usage: `/genkey <duration>`", quote=True)
     delta = parse_duration(parts[1])
     if delta.total_seconds() <= 0:
-        return await m.reply("❌ Invalid duration. Use `1d`, `12h`, `30m`.", quote=True)
-
+        return await m.reply("❌ Invalid duration. Use `1d`, `12h`, or `30m`.", quote=True)
     key    = "XENO-" + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
     now    = datetime.now(timezone.utc)
     expiry = now + delta
@@ -222,14 +230,14 @@ async def genkey_cmd(_, m: Message):
         }).execute()
         await m.reply(f"✅ Key: `{key}`\nExpires: `{expiry}`\nRedeem with `/redeem {key}`")
     except Exception as e:
-        print("[ERROR] key insert:", e)
+        print(f"[ERROR] key insert: {e}")
         await m.reply("❌ Failed to generate key. Try again later.")
 
-# — /redeem cmd —
+# — /redeem —
 @app.on_message(filters.command("redeem") & filters.private)
 async def redeem_cmd(_, m: Message):
-    parts = m.text.split()
-    if len(parts)!=2:
+    parts = m.text.strip().split()
+    if len(parts) != 2:
         return await m.reply("❌ Usage: `/redeem <key>`", quote=True)
     key = parts[1].upper()
     now = datetime.now(timezone.utc)
@@ -248,7 +256,7 @@ async def redeem_cmd(_, m: Message):
             .eq("key", key).execute()
         await m.reply(f"✅ Redeemed! Valid until {exp}\nUse /menu now.")
     except Exception as e:
-        print("[ERROR] redeem failed:", e)
+        print(f"[ERROR] redeem failed: {e}")
         await m.reply("❌ Something went wrong. Try again later.")
 
 if __name__ == "__main__":
