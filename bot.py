@@ -96,20 +96,6 @@ async def start_cmd(_, m: Message):
         ])
         await m.reply("👋 You need a premium key. Buy one below:", reply_markup=kb)
 
-# — /menu —
-@app.on_message(filters.command("menu") & filters.private)
-async def menu_cmd(_, m: Message):
-    uid = m.from_user.id
-    if not await check_user_access(uid):
-        return await m.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔐 Encrypt", callback_data="menu_encrypt")],
-        [InlineKeyboardButton("🔓 Decrypt", callback_data="menu_decrypt")],
-        [InlineKeyboardButton("👥 Refer",   callback_data="menu_refer")],
-    ])
-    await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
-
-# — Encrypt button —
 # — Encrypt button —
 @app.on_message(filters.command("menu") & filters.private)
 async def menu_cmd(_, m: Message):
