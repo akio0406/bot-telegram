@@ -111,48 +111,72 @@ async def menu_cmd(_, m: Message):
 
 # — Encrypt button —
 # — Encrypt button —
+@app.on_message(filters.command("menu") & filters.private)
+async def menu_cmd(_, m: Message):
+    if not await check_user_access(m.from_user.id):
+        return await m.reply("⛔ Redeem a key first with `/redeem <key>`.")
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔐 Encrypt", callback_data="menu_encrypt"),
+         InlineKeyboardButton("🔓 Decrypt", callback_data="menu_decrypt")],
+        [InlineKeyboardButton("🔍 Search",  callback_data="menu_search"),
+         InlineKeyboardButton("👥 Refer",   callback_data="menu_refer")],
+    ])
+    await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
+
+# — Encrypt button —
 @app.on_callback_query(filters.regex("^menu_encrypt$"))
-async def on_encrypt_cb(bot: Client, cq: CallbackQuery):
+async def on_encrypt_cb(_, cq: CallbackQuery):
     uid = cq.from_user.id
-    print(f"[HANDLER] Encrypt button pressed by {uid}")
     await cq.answer("Encrypt mode activated!")
-    # ◀─ Clear the buttons from the original /menu message
     await cq.message.edit_reply_markup(None)
-
     if not await check_user_access(uid):
-        return await cq.message.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
-
+        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
     user_state[uid] = "encrypt"
     await cq.message.reply("📂 Send a `.py` or `.txt` file (max 10MB) to encrypt.")
-    print(f"[HANDLER] Encrypt prompt sent to {uid}")
-
 
 # — Decrypt button —
 @app.on_callback_query(filters.regex("^menu_decrypt$"))
-async def on_decrypt_cb(bot: Client, cq: CallbackQuery):
+async def on_decrypt_cb(_, cq: CallbackQuery):
     uid = cq.from_user.id
-    print(f"[HANDLER] Decrypt button pressed by {uid}")
     await cq.answer("Decrypt mode activated!")
-    # ◀─ Clear the buttons from the original /menu message
     await cq.message.edit_reply_markup(None)
-
     if not await check_user_access(uid):
-        return await cq.message.reply("⛔ You need to redeem a key first (`/redeem <key>`).")
-
+        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
     user_state[uid] = "decrypt"
     await cq.message.reply("📂 Send an encrypted `.py` or `.txt` file to decrypt.")
-    print(f"[HANDLER] Decrypt prompt sent to {uid}")
 
-# — Fallback commands —
+# — Search button —
+@app.on_callback_query(filters.regex("^menu_search$"))
+async def on_search_cb(_, cq: CallbackQuery):
+    uid = cq.from_user.id
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    if not await check_user_access(uid):
+        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎲 Roblox",          callback_data="keyword_roblox")],
+        [InlineKeyboardButton("🔥 Mobile Legends", callback_data="keyword_mobilelegends")],
+        [InlineKeyboardButton("💳 Codashop",        callback_data="keyword_codashop")],
+        [InlineKeyboardButton("🛡 Garena",          callback_data="expand_garena")],
+        [InlineKeyboardButton("🌐 Social Media",    callback_data="expand_socmeds")],
+        [InlineKeyboardButton("✉️ Email Providers",callback_data="expand_emails")],
+        [InlineKeyboardButton("🎮 Gaming",          callback_data="expand_gaming")],
+    ])
+    await cq.message.reply(
+        "🔎 DATABASE SEARCH\n\n📌 Choose a keyword to search:",
+        reply_markup=kb
+    )
+
+# — Fallback /encrypt & /decrypt commands —
 @app.on_message(filters.command("encrypt") & filters.private)
 async def cmd_encrypt(_, m: Message):
     user_state[m.from_user.id] = "encrypt"
-    await m.reply("📂 Send a `.py` or `.txt` file (max 10MB) to encrypt.")
+    await m.reply("📂 Send a `.py` or `.txt` file to encrypt.")
 
 @app.on_message(filters.command("decrypt") & filters.private)
 async def cmd_decrypt(_, m: Message):
     user_state[m.from_user.id] = "decrypt"
-    await m.reply("📂 Send the encrypted `.py` or `.txt` file to decrypt.")
+    await m.reply("📂 Send an encrypted `.py` or `.txt` file to decrypt.")
 
 # — File handler —
 @app.on_message(filters.document & filters.private)
@@ -160,7 +184,7 @@ async def file_handler(bot: Client, m: Message):
     uid  = m.from_user.id
     mode = user_state.pop(uid, None)
     if not mode:
-        return await m.reply("⚠️ First choose Encrypt or Decrypt via /menu.")
+        return await m.reply("⚠️ First choose Encrypt, Decrypt or Search via /menu.")
     if mode == "encrypt":
         await do_encrypt(bot, m)
     else:
@@ -169,7 +193,7 @@ async def file_handler(bot: Client, m: Message):
 async def do_encrypt(bot: Client, m: Message):
     doc = m.document
     if not doc.file_name.lower().endswith((".py", ".txt")):
-        return await m.reply("❌ Only `.py` or `.txt` files are allowed.")
+        return await m.reply("❌ Only .py/.txt allowed.")
     if doc.file_size > MAX_SIZE:
         return await m.reply("❌ File too large (max 10MB).")
     prog = await m.reply("⏳ Downloading...")
@@ -178,11 +202,10 @@ async def do_encrypt(bot: Client, m: Message):
     try:
         raw = open(path, "r", encoding="utf-8", errors="ignore").read()
         b64 = base64.b64encode(raw.encode()).decode()
-        payload = f"import base64\nexec(base64.b64decode('{b64}').decode('utf-8'))\n"
         out_fn = f"encrypted_{doc.file_name}"
         with open(out_fn, "w", encoding="utf-8") as f:
-            f.write(payload)
-        await bot.send_document(m.chat.id, out_fn, caption="✅ Encrypted file ready.")
+            f.write(f"import base64\nexec(base64.b64decode('{b64}').decode())\n")
+        await bot.send_document(m.chat.id, out_fn, caption="✅ Encrypted!")
     except Exception as e:
         await prog.edit(f"❌ Encryption error: {e}")
     finally:
@@ -193,7 +216,7 @@ async def do_encrypt(bot: Client, m: Message):
 async def do_decrypt(bot: Client, m: Message):
     doc = m.document
     if not doc.file_name.lower().endswith((".py", ".txt")):
-        return await m.reply("❌ Only `.py` or `.txt` files are allowed.")
+        return await m.reply("❌ Only .py/.txt allowed.")
     if doc.file_size > MAX_SIZE:
         return await m.reply("❌ File too large (max 10MB).")
     prog = await m.reply("⏳ Downloading...")
@@ -201,20 +224,173 @@ async def do_decrypt(bot: Client, m: Message):
     await prog.edit("🔓 Decrypting...")
     try:
         content = open(path, "r", encoding="utf-8", errors="ignore").read()
-        mobj    = re.search(r"base64\.b64decode\('(.+?)'\)", content)
+        mobj = re.search(r"b64decode\('(.+?)'\)", content)
         if not mobj:
-            raise ValueError("No encrypted payload found.")
-        decoded = base64.b64decode(mobj.group(1)).decode("utf-8")
-        out_fn  = f"decrypted_{doc.file_name}"
+            raise ValueError("No payload.")
+        dec = base64.b64decode(mobj.group(1)).decode()
+        out_fn = f"decrypted_{doc.file_name}"
         with open(out_fn, "w", encoding="utf-8") as f:
-            f.write(decoded)
-        await bot.send_document(m.chat.id, out_fn, caption="✅ Decrypted file ready.")
+            f.write(dec)
+        await bot.send_document(m.chat.id, out_fn, caption="✅ Decrypted!")
     except Exception as e:
         await prog.edit(f"❌ Decryption error: {e}")
     finally:
         await prog.delete()
         os.remove(path)
         if os.path.exists(out_fn): os.remove(out_fn)
+
+# — Expand & submenus —
+@app.on_callback_query(filters.regex("^expand_garena$"))
+async def expand_garena(client, cq: CallbackQuery):
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎮 Garena.com",      callback_data="keyword_garena.com")],
+        [InlineKeyboardButton("🔐 100082",          callback_data="keyword_100082")],
+        [InlineKeyboardButton("🔐 100055",          callback_data="keyword_100055")],
+        [InlineKeyboardButton("🛡 Authgop",          callback_data="keyword_authgop.garena.com")],
+        [InlineKeyboardButton("🔐 Gaslite",          callback_data="keyword_gaslite")],
+        [InlineKeyboardButton("🔙 Back",             callback_data="back_to_main")],
+    ])
+    await cq.message.edit_text("🛡 GARENA SUB-KEYWORDS:", reply_markup=kb)
+
+@app.on_callback_query(filters.regex("^expand_socmeds$"))
+async def expand_socmeds(client, cq: CallbackQuery):
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📘 Facebook",         callback_data="keyword_facebook.com")],
+        [InlineKeyboardButton("📸 Instagram",        callback_data="keyword_instagram.com")],
+        [InlineKeyboardButton("📱 WhatsApp",         callback_data="keyword_whatsapp.com")],
+        [InlineKeyboardButton("🐦 Twitter",          callback_data="keyword_twitter.com")],
+        [InlineKeyboardButton("💬 Discord",          callback_data="keyword_discord.com")],
+        [InlineKeyboardButton("🔙 Back",             callback_data="back_to_main")],
+    ])
+    await cq.message.edit_text("🌐 SOCIAL MEDIA OPTIONS:", reply_markup=kb)
+
+@app.on_callback_query(filters.regex("^expand_emails$"))
+async def expand_emails(client, cq: CallbackQuery):
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📧 Gmail",            callback_data="keyword_google.com")],
+        [InlineKeyboardButton("📧 Yahoo",            callback_data="keyword_yahoo.com")],
+        [InlineKeyboardButton("📧 Outlook",          callback_data="keyword_outlook.com")],
+        [InlineKeyboardButton("🔙 Back",             callback_data="back_to_main")],
+    ])
+    await cq.message.edit_text("✉️ EMAIL PROVIDERS:", reply_markup=kb)
+
+@app.on_callback_query(filters.regex("^expand_gaming$"))
+async def expand_gaming(client, cq: CallbackQuery):
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎮 Riot",            callback_data="keyword_riotgames.com")],
+        [InlineKeyboardButton("🎮 Battle.net",       callback_data="keyword_battle.net")],
+        [InlineKeyboardButton("🎮 Minecraft",        callback_data="keyword_minecraft.net")],
+        [InlineKeyboardButton("🎮 Supercell",        callback_data="keyword_supercell.com")],
+        [InlineKeyboardButton("🎮 Wargaming",        callback_data="keyword_wargaming.net")],
+        [InlineKeyboardButton("🔙 Back",             callback_data="back_to_main")],
+    ])
+    await cq.message.edit_text("🎮 GAMING OPTIONS:", reply_markup=kb)
+
+@app.on_callback_query(filters.regex("^back_to_main$"))
+async def back_to_main(client, cq: CallbackQuery):
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎲 Roblox",          callback_data="keyword_roblox")],
+        [InlineKeyboardButton("🔥 Mobile Legends", callback_data="keyword_mobilelegends")],
+        [InlineKeyboardButton("💳 Codashop",        callback_data="keyword_codashop")],
+        [InlineKeyboardButton("🛡 Garena",          callback_data="expand_garena")],
+        [InlineKeyboardButton("🌐 Social Media",    callback_data="expand_socmeds")],
+        [InlineKeyboardButton("✉️ Email Providers",callback_data="expand_emails")],
+        [InlineKeyboardButton("🎮 Gaming",          callback_data="expand_gaming")],
+    ])
+    await cq.message.edit_text("🔎 DATABASE SEARCH\n\n📌 Choose a keyword:", reply_markup=kb)
+
+# — Ask format —
+@app.on_callback_query(filters.regex("^keyword_"))
+async def ask_format(client, cq: CallbackQuery):
+    keyword = cq.data.split("_",1)[1]
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ User:Pass only", callback_data=f"format_{keyword}_userpass")],
+        [InlineKeyboardButton("🌍 Include URLs",    callback_data=f"format_{keyword}_full")],
+    ])
+    await cq.message.edit_text(
+        f"🔎 Keyword: `{keyword}`\nChoose output format:",
+        reply_markup=kb
+    )
+
+# — Perform search via Supabase —
+@app.on_callback_query(filters.regex("^format_"))
+async def perform_search(client, cq: CallbackQuery):
+    _, keyword, fmt = cq.data.split("_",2)
+    include_urls = (fmt=="full")
+    await cq.answer("⏳ Searching…")
+    # query xeno table’s line column
+    resp = supabase.from_("xeno").select("line").ilike("line", f"%{keyword}%").execute()
+    rows = resp.data or []
+    if not rows:
+        return await cq.message.edit_text("❌ No matches found.")
+    all_lines = [r["line"] for r in rows]
+    count     = min(len(all_lines), random.randint(100,110))
+    selected  = random.sample(all_lines, count)
+    # optional dedupe tracking
+    used_file = "no_dupes.txt"
+    used = set(open(used_file).read().splitlines()) if os.path.exists(used_file) else set()
+    with open(used_file, "a") as f:
+        for L in selected:
+            if L not in used:
+                f.write(L+"\n")
+    # write results
+    os.makedirs("Generated", exist_ok=True)
+    result_path = f"Generated/premium_{keyword}.txt"
+    with open(result_path,"w",encoding="utf-8") as f:
+        for L in selected:
+            if include_urls:
+                f.write(L+"\n")
+            else:
+                parts = L.split(":")
+                f.write(":".join(parts[-2:])+"\n")
+    # preview
+    preview = selected[:5]
+    if not include_urls:
+        preview = [":".join(l.split(":")[-2:]) for l in preview]
+    preview_text = "\n".join(preview)+("\n..." if len(selected)>5 else "")
+    label = "🌍 Full (URLs)" if include_urls else "✅ User:Pass"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📥 Download Results",
+            callback_data=f"download_results_{os.path.basename(result_path)}_{keyword}"
+        )],
+        [InlineKeyboardButton("📋 Copy Code",
+            callback_data=f"copy_code_{os.path.basename(result_path)}_{keyword}"
+        )],
+    ])
+    await cq.message.edit_text(
+        f"🔎 PREMIUM `{keyword}`\n📄 Format: {label}\n📌 Matches: `{len(selected)}`\n\n"
+        f"🔹 Preview:\n```\n{preview_text}\n```",
+        reply_markup=kb
+    )
+
+# — Copy code —
+@app.on_callback_query(filters.regex("^copy_code_"))
+async def copy_results_text(client, cq: CallbackQuery):
+    _, _, filename, keyword = cq.data.split("_",3)
+    path = f"Generated/{filename}"
+    if os.path.exists(path):
+        content = open(path,"r",encoding="utf-8").read()
+        if len(content)>4096:
+            content = content[:4090]+"...\n[Truncated]"
+        await cq.message.reply(f"<b>Results for:</b> <code>{keyword}</code>\n<pre>{content}</pre>",
+                               parse_mode="HTML")
+        os.remove(path)
+    await cq.message.delete()
+
+# — Download results —
+@app.on_callback_query(filters.regex("^download_results_"))
+async def download_results_file(client, cq: CallbackQuery):
+    parts = cq.data.split("_",3)
+    _, _, filename, keyword = parts
+    path = f"Generated/{filename}"
+    if os.path.exists(path):
+        await client.send_document(
+            cq.message.chat.id,
+            document=path,
+            caption=f"📄 PREMIUM results for `{keyword}`"
+        )
+        os.remove(path)
+    await cq.message.delete()
 
 # — Admin: /genkey & /generate —
 @app.on_message(filters.command(["genkey","generate"]) & filters.private & filters.user(ADMIN_ID))
