@@ -96,16 +96,23 @@ async def start_cmd(_, m: Message):
         ])
         await m.reply("👋 You need a premium key. Buy one below:", reply_markup=kb)
 
-# — Encrypt button —
+# — /menu command —
 @app.on_message(filters.command("menu") & filters.private)
 async def menu_cmd(_, m: Message):
     if not await check_user_access(m.from_user.id):
         return await m.reply("⛔ Redeem a key first with `/redeem <key>`.")
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔐 Encrypt", callback_data="menu_encrypt"),
-         InlineKeyboardButton("🔓 Decrypt", callback_data="menu_decrypt")],
-        [InlineKeyboardButton("🔍 Search",  callback_data="menu_search"),
-         InlineKeyboardButton("👥 Refer",   callback_data="menu_refer")],
+        [
+            InlineKeyboardButton("🔐 Encrypt",    callback_data="menu_encrypt"),
+            InlineKeyboardButton("🔓 Decrypt",    callback_data="menu_decrypt")
+        ],
+        [
+            InlineKeyboardButton("🔍 Search",     callback_data="menu_search"),
+            InlineKeyboardButton("➖ Remove URLs", callback_data="menu_removeurl")
+        ],
+        [
+            InlineKeyboardButton("👥 Refer",      callback_data="menu_refer")
+        ],
     ])
     await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
 
@@ -153,6 +160,17 @@ async def on_search_cb(_, cq: CallbackQuery):
         reply_markup=kb
     )
 
+# — Remove URLs button —
+@app.on_callback_query(filters.regex("^menu_removeurl$"))
+async def on_removeurl_cb(_, cq: CallbackQuery):
+    uid = cq.from_user.id
+    await cq.answer("Remove-URLs mode activated!")
+    await cq.message.edit_reply_markup(None)
+    if not await check_user_access(uid):
+        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
+    user_state[uid] = "removeurl"
+    await cq.message.reply("📂 Send a file containing URLs to remove.")
+    
 # — Fallback /encrypt & /decrypt commands —
 @app.on_message(filters.command("encrypt") & filters.private)
 async def cmd_encrypt(_, m: Message):
@@ -167,14 +185,19 @@ async def cmd_decrypt(_, m: Message):
 # — File handler —
 @app.on_message(filters.document & filters.private)
 async def file_handler(bot: Client, m: Message):
-    uid  = m.from_user.id
-    mode = user_state.pop(uid, None)
+    uid   = m.from_user.id
+    mode  = user_state.pop(uid, None)
     if not mode:
-        return await m.reply("⚠️ First choose Encrypt, Decrypt or Search via /menu.")
+        return await m.reply(
+            "⚠️ First choose Encrypt, Decrypt, Search or Remove URLs via /menu."
+        )
+
     if mode == "encrypt":
         await do_encrypt(bot, m)
-    else:
+    elif mode == "decrypt":
         await do_decrypt(bot, m)
+    elif mode == "removeurl":
+        await process_removeurl_file(bot, m)
 
 async def do_encrypt(bot: Client, m: Message):
     doc = m.document
