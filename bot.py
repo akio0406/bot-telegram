@@ -248,6 +248,38 @@ async def do_decrypt(bot: Client, m: Message):
         os.remove(path)
         if os.path.exists(out_fn): os.remove(out_fn)
 
+async def process_removeurl_file(bot: Client, m: Message):
+    """
+    Downloads the user’s document, strips out all URLs,
+    and returns a cleaned file.
+    """
+    doc = m.document
+    # only .txt or .py
+    if not doc.file_name.lower().endswith((".txt", ".py")):
+        return await m.reply("❌ Only .txt or .py files are allowed.")
+    # size guard
+    if doc.file_size > MAX_SIZE:
+        return await m.reply("❌ File too large (max 10MB).")
+
+    prog = await m.reply("⏳ Downloading…")
+    path = await bot.download_media(m)
+    await prog.edit("➖ Removing URLs…")
+
+    # read & strip URLs
+    text = open(path, "r", encoding="utf-8", errors="ignore").read()
+    cleaned = re.sub(r"https?://\S+", "[removed]", text)
+
+    out_fn = f"no_urls_{doc.file_name}"
+    with open(out_fn, "w", encoding="utf-8") as f:
+        f.write(cleaned)
+
+    # send back
+    await bot.send_document(m.chat.id, out_fn, caption="✅ URLs removed.")
+    # cleanup
+    await prog.delete()
+    os.remove(path)
+    os.remove(out_fn)
+    
 # — Expand & submenus —
 @app.on_callback_query(filters.regex("^expand_garena$"))
 async def expand_garena(client, cq: CallbackQuery):
