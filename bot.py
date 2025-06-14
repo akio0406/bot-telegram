@@ -600,32 +600,33 @@ async def redeem_cmd(_, m: Message):
         await m.reply("❌ Something went wrong. Try again later.", quote=True)
 
 
-# — single in‐memory admin flow state —
+# in‐memory admin flow state
 admin_state: dict[int, str] = {}
 
-# — /adminmenu: show admin actions once only —
+# — /adminmenu: show admin actions —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📤 Generate Key",   callback_data="admin_genkey"),
-            InlineKeyboardButton("❌ Remove Key",     callback_data="admin_removekey"),
+            InlineKeyboardButton("📤 Generate Key",     callback_data="admin_genkey"),
+            InlineKeyboardButton("❌ Remove Key",       callback_data="admin_removekey"),
         ],
         [
-            InlineKeyboardButton("⌛ Remove Expired", callback_data="admin_remove_expired"),
+            InlineKeyboardButton("⌛ Remove Expired",   callback_data="admin_remove_expired"),
+            InlineKeyboardButton("🗓 Extend Key",       callback_data="admin_extend_key"),
         ],
     ])
     await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
 
-# — Generate Key button → ask for duration —
+# — on “Generate Key” button press: ask for duration —
 @app.on_callback_query(filters.regex("^admin_genkey$") & filters.user(ADMIN_ID))
 async def admin_genkey_cb(_, cq: CallbackQuery):
     await cq.answer()
     await cq.message.edit_reply_markup(None)
     admin_state[cq.from_user.id] = "await_duration"
-    await cq.message.reply("🛠 Enter duration (e.g. 1d, 12h, 30m):")
+    await cq.message.reply("🛠 Enter duration for the new key (e.g. 1d, 12h, 30m):")
 
-# — Remove Key button → ask for key to delete —
+# — on “Remove Key” button press: ask for key string —
 @app.on_callback_query(filters.regex("^admin_removekey$") & filters.user(ADMIN_ID))
 async def admin_removekey_cb(_, cq: CallbackQuery):
     await cq.answer()
@@ -633,7 +634,7 @@ async def admin_removekey_cb(_, cq: CallbackQuery):
     admin_state[cq.from_user.id] = "await_remove_key"
     await cq.message.reply("🛠 Send the exact key to remove (e.g. XENO-ABCDEFG1234):")
 
-# — Remove Expired button → sweep old rows immediately —
+# — on “Remove Expired” button press: sweep old keys immediately —
 @app.on_callback_query(filters.regex("^admin_remove_expired$") & filters.user(ADMIN_ID))
 async def admin_remove_expired_cb(_, cq: CallbackQuery):
     await cq.answer()
@@ -650,11 +651,23 @@ async def admin_remove_expired_cb(_, cq: CallbackQuery):
 
     await cq.message.reply(f"✅ Removed {removed} expired key(s).")
 
-# — text‐handler for the two multi‐step flows —
+# — on “Extend Key” button press: ask for key & duration —
+@app.on_callback_query(filters.regex("^admin_extend_key$") & filters.user(ADMIN_ID))
+async def admin_extend_key_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    admin_state[cq.from_user.id] = "await_extend_key"
+    await cq.message.reply(
+        "🗓 Send the key and duration to extend, separated by space\n"
+        "Example: XENO-ABCDEFG1234 1d"
+    )
+
+# — catch the next text from admin for all multi‐step flows —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
 async def admin_flow_handler(_, m: Message):
     flow = admin_state.get(m.from_user.id)
 
+    # 1) Generate Key flow
     if flow == "await_duration":
         code  = m.text.strip()
         delta = parse_duration(code)
@@ -665,6 +678,7 @@ async def admin_flow_handler(_, m: Message):
                      "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
         now    = datetime.now(timezone.utc)
         expiry = now + delta
+
         try:
             supabase.table("xeno_keys").insert({
                 "key":         key,
@@ -685,8 +699,9 @@ async def admin_flow_handler(_, m: Message):
             print(f"[ERROR] admin genkey: {e}")
             await m.reply("❌ Failed to create key. Try again later.", quote=True)
 
+    # 2) Remove specific Key flow
     elif flow == "await_remove_key":
-        key  = m.text.strip().upper()
+        key = m.text.strip().upper()
         resp = supabase.table("xeno_keys").select("key").eq("key", key).execute()
         if not resp.data:
             await m.reply("❌ No such key found.", quote=True)
@@ -698,8 +713,46 @@ async def admin_flow_handler(_, m: Message):
                 print(f"[ERROR] admin removekey: {e}")
                 await m.reply("❌ Failed to remove key. Try again later.", quote=True)
 
-    # clear the flow state in _any_ case
+    # 3) Extend Key flow
+    elif flow == "await_extend_key":
+        parts = m.text.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            return await m.reply(
+                "❌ Usage: KEY DURATION\n"
+                "Example: XENO-ABCDEFG1234 1d",
+                quote=True
+            )
+
+        key_str, dur = parts[0].upper(), parts[1]
+        delta = parse_duration(dur)
+        if delta.total_seconds() <= 0:
+            return await m.reply("❌ Invalid duration. Enter 1d, 12h, or 30m.", quote=True)
+
+        # fetch existing record
+        resp = supabase.table("xeno_keys").select("expiry").eq("key", key_str).execute()
+        if not resp.data:
+            return await m.reply("❌ Key not found.", quote=True)
+
+        old_exp = datetime.fromisoformat(resp.data[0]["expiry"].replace("Z", "+00:00"))
+        new_exp = old_exp + delta
+
+        try:
+            supabase.table("xeno_keys") \
+                .update({"expiry": new_exp.isoformat()}) \
+                .eq("key", key_str).execute()
+            await m.reply(
+                f"✅ Extended {key_str} by {dur}\n"
+                f"Old expiry: {old_exp}\n"
+                f"New expiry: {new_exp}",
+                quote=True
+            )
+        except Exception as e:
+            print(f"[ERROR] admin extendkey: {e}")
+            await m.reply("❌ Failed to extend key. Try again later.", quote=True)
+
+    # clear the flow state for any branch
     admin_state.pop(m.from_user.id, None)
+
         
 if __name__ == "__main__":
     app.run()
