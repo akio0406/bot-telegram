@@ -592,16 +592,20 @@ async def redeem_cmd(_, m: Message):
 async def redeem_cmd(_, m: Message):
     parts = m.text.strip().split()
     if len(parts) != 2:
-        # use Markdown so backticks work, and <key> isn’t parsed as HTML
+        # specify Markdown so <key> isn’t treated as an HTML tag
         return await m.reply(
             "❌ Usage: `/redeem <key>`",
             quote=True,
             parse_mode="Markdown"
         )
+
     key = parts[1].upper()
     now = datetime.now(timezone.utc)
     try:
-        resp = supabase.table("xeno_keys").select("*").eq("key", key).execute()
+        resp = supabase.table("xeno_keys") \
+            .select("*") \
+            .eq("key", key) \
+            .execute()
         if not resp.data:
             return await m.reply("❌ Invalid key.", quote=True)
         row = resp.data[0]
