@@ -668,29 +668,37 @@ async def _(_, cq: CallbackQuery):
         "Example: XENO-ABCDEFG1234 1d"
     )
 
-
 @app.on_callback_query(filters.regex("^admin_ban_user$") & filters.user(ADMIN_ID))
-async def _(_, cq: CallbackQuery):
-    await start_flow(cq, "await_ban_user", "⛔ Send the Telegram user_id to ban:")
-
-
-@app.on_callback_query(filters.regex("^admin_unban_user$") & filters.user(ADMIN_ID))
-async def _(_, cq: CallbackQuery):
-    await start_flow(cq, "await_unban_user", "✔️ Send the Telegram user_id to unban:")
-
-
-@app.on_callback_query(filters.regex("^admin_show_banlist$") & filters.user(ADMIN_ID))
-async def _(_, cq: CallbackQuery):
+async def admin_ban_user_cb(_, cq: CallbackQuery):
     await cq.answer()
     await cq.message.edit_reply_markup(None)
-    banned = load_banned()
-    if not banned:
-        text = "✅ No users are currently banned."
+    admin_state[cq.from_user.id] = "await_ban_user"
+    await cq.message.reply("⛔ Send the Telegram user_id to ban (will mark all their keys as banned):")
+    
+@app.on_callback_query(filters.regex("^admin_unban_user$") & filters.user(ADMIN_ID))
+async def admin_unban_user_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    admin_state[cq.from_user.id] = "await_unban_user"
+    await cq.message.reply("✔️ Send the Telegram user_id to unban (will clear banned on all their keys):")
+
+@app.on_callback_query(filters.regex("^admin_show_banlist$") & filters.user(ADMIN_ID))
+async def admin_show_banlist_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    # fetch all rows where banned = true and redeemed_by is not null
+    resp = supabase.table("xeno_keys") \
+        .select("redeemed_by") \
+        .neq("redeemed_by", None) \
+        .eq("banned", True) \
+        .execute()
+    users = {row["redeemed_by"] for row in (resp.data or [])}
+    if not users:
+        await cq.message.reply("✅ No users are currently banned.")
     else:
-        text = "🚫 Banned users:\n" + "\n".join(f"- {uid}" for uid in banned)
-    await cq.message.reply(text)
-
-
+        lines = "\n".join(f"- `{uid}`" for uid in sorted(users))
+        await cq.message.reply(f"🚫 Banned users:\n{lines}")
+        
 # — single text-handler for all “ask next” flows —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
 async def admin_flow_handler(_, m: Message):
@@ -698,19 +706,23 @@ async def admin_flow_handler(_, m: Message):
 
     # 1) Generate Key
     if flow == "await_duration":
-        code, delta = m.text.strip(), parse_duration(m.text.strip())
+        code = m.text.strip()
+        delta = parse_duration(code)
         if delta.total_seconds() <= 0:
             return await m.reply("❌ Invalid duration. Enter 1d, 12h, or 30m.", quote=True)
+
         key    = "XENO-" + "".join(random.choices(
                      "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
-        expiry = datetime.now(timezone.utc) + delta
+        now    = datetime.now(timezone.utc)
+        expiry = now + delta
+
         try:
             supabase.table("xeno_keys").insert({
                 "key":         key,
                 "expiry":      expiry.isoformat(),
                 "redeemed_by": None,
                 "owner_id":    ADMIN_ID,
-                "created":     datetime.now(timezone.utc).isoformat(),
+                "created":     now.isoformat(),
                 "duration":    code,
                 "banned":      False
             }).execute()
@@ -752,7 +764,8 @@ async def admin_flow_handler(_, m: Message):
 
         old_exp = datetime.fromisoformat(resp.data[0]["expiry"].replace("Z", "+00:00"))
         new_exp = old_exp + delta
-        supabase.table("xeno_keys").update({"expiry": new_exp.isoformat()}) \
+        supabase.table("xeno_keys") \
+            .update({"expiry": new_exp.isoformat()}) \
             .eq("key", key_str).execute()
         await m.reply(
             f"✅ Extended {key_str} by {dur}\n"
@@ -763,30 +776,49 @@ async def admin_flow_handler(_, m: Message):
     # 4) Ban User
     elif flow == "await_ban_user":
         try:
-            uid = int(m.text.strip())
+            target = int(m.text.strip())
         except ValueError:
             return await m.reply("❌ Invalid user_id. Send a numeric ID.", quote=True)
-        banned = load_banned()
-        if uid in banned:
-            await m.reply("⚠️ That user is already banned.", quote=True)
+
+        # mark all redeemed keys as banned
+        resp = supabase.table("xeno_keys") \
+            .update({"banned": True}) \
+            .eq("redeemed_by", target) \
+            .neq("redeemed_by", None) \
+            .execute()
+        count = len(resp.data or [])
+        if count:
+            await m.reply(
+                f"✅ User `{target}` banned.\n"
+                f"Marked {count} key(s) as banned.",
+                quote=True
+            )
         else:
-            banned.append(uid); save_banned(banned)
-            await m.reply(f"✅ User `{uid}` has been banned.", quote=True)
+            await m.reply("⚠️ No redeemed keys found for that user.", quote=True)
 
     # 5) Unban User
     elif flow == "await_unban_user":
         try:
-            uid = int(m.text.strip())
+            target = int(m.text.strip())
         except ValueError:
             return await m.reply("❌ Invalid user_id. Send a numeric ID.", quote=True)
-        banned = load_banned()
-        if uid not in banned:
-            await m.reply("⚠️ That user is not banned.", quote=True)
-        else:
-            banned.remove(uid); save_banned(banned)
-            await m.reply(f"✅ User `{uid}` has been unbanned.", quote=True)
 
-    # clear the flow state
+        resp = supabase.table("xeno_keys") \
+            .update({"banned": False}) \
+            .eq("redeemed_by", target) \
+            .neq("redeemed_by", None) \
+            .execute()
+        count = len(resp.data or [])
+        if count:
+            await m.reply(
+                f"✅ User `{target}` unbanned.\n"
+                f"Cleared banned on {count} key(s).",
+                quote=True
+            )
+        else:
+            await m.reply("⚠️ No banned keys found for that user.", quote=True)
+
+    # Clear flow state so it only runs once
     admin_state.pop(m.from_user.id, None)
 
         
