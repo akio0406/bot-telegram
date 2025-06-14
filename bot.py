@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, SupabaseException
+from zoneinfo import ZoneInfo        # Python 3.9+
 
 # — Load ENV —
 API_ID    = int(os.getenv("API_ID", "0"))
@@ -207,9 +208,9 @@ async def on_removedupe_cb(_, cq: CallbackQuery):
 @app.on_callback_query(filters.regex("^menu_myinfo$"))
 async def on_myinfo_cb(_, cq: CallbackQuery):
     uid = cq.from_user.id
-    await cq.answer()   # just dismiss the “loading…” spinner
+    await cq.answer()   # dismiss loading spinner
 
-    # 1) lookup…
+    # 1) Fetch key & expiry from Supabase
     resp = supabase.table("xeno_keys") \
         .select("key, expiry") \
         .eq("redeemed_by", uid) \
@@ -221,22 +222,36 @@ async def on_myinfo_cb(_, cq: CallbackQuery):
         return await cq.answer("❌ You haven’t redeemed a key yet.", show_alert=True)
 
     info   = rows[0]
-    expiry = datetime.fromisoformat(info["expiry"].replace("Z","+00:00"))
-    now    = datetime.now(timezone.utc)
-    rem    = int((expiry - now).total_seconds())
+    # parse expiry as UTC
+    expiry_utc = datetime.fromisoformat(info["expiry"].replace("Z","+00:00"))
+    now_utc    = datetime.now(timezone.utc)
 
-    days, rem   = divmod(rem, 86400)
-    hours, rem  = divmod(rem, 3600)
-    minutes, _  = divmod(rem, 60)
-    dur = days and f"{days}d {hours}h {minutes}m" or hours and f"{hours}h {minutes}m" or f"{minutes}m"
+    # convert both to Asia/Manila
+    manila = ZoneInfo("Asia/Manila")
+    expiry_ph = expiry_utc.astimezone(manila)
+    now_ph    = now_utc   .astimezone(manila)
 
+    # compute remaining (still in UTC or you can use now_ph—same delta)
+    remaining = expiry_utc - now_utc
+    secs      = int(remaining.total_seconds())
+    days, secs   = divmod(secs, 86400)
+    hours, secs  = divmod(secs, 3600)
+    minutes, _   = divmod(secs, 60)
+    if days:
+        dur = f"{days}d {hours}h {minutes}m"
+    elif hours:
+        dur = f"{hours}h {minutes}m"
+    else:
+        dur = f"{minutes}m"
+
+    # build a pure-text info card in PH time
     text = (
-      f"🆔 Your Key: {info['key']}\n"
-      f"📅 Expires on: {expiry}\n"
-      f"⏳ Time left: {dur}"
+        f"🆔 Your Key: {info['key']}\n"
+        f"📅 Expires on (PH): {expiry_ph:%Y-%m-%d %H:%M:%S}\n"
+        f"⏳ Time left: {dur}"
     )
 
-    # This single call drops the inline buttons AND updates the text.
+    # replace the menu with this info
     await cq.message.edit_text(text)
 
 # — Fallback commands —
