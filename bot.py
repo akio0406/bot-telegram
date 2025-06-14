@@ -587,25 +587,20 @@ async def redeem_cmd(_, m: Message):
         print(f"[ERROR] redeem failed: {e}")
         await m.reply("❌ Something went wrong. Try again later.")
 
-# — /redeem (any user) —
 @app.on_message(filters.command("redeem") & filters.private)
 async def redeem_cmd(_, m: Message):
     parts = m.text.strip().split()
     if len(parts) != 2:
-        # specify Markdown so <key> isn’t treated as an HTML tag
+        # plain text avoids any entity‐parsing errors
         return await m.reply(
-            "❌ Usage: `/redeem <key>`",
-            quote=True,
-            parse_mode="Markdown"
+            "❌ Usage: /redeem <key>\n"
+            "Example: /redeem XENO-ABCDEFG1234",
+            quote=True
         )
-
     key = parts[1].upper()
     now = datetime.now(timezone.utc)
     try:
-        resp = supabase.table("xeno_keys") \
-            .select("*") \
-            .eq("key", key) \
-            .execute()
+        resp = supabase.table("xeno_keys").select("*").eq("key", key).execute()
         if not resp.data:
             return await m.reply("❌ Invalid key.", quote=True)
         row = resp.data[0]
@@ -617,11 +612,7 @@ async def redeem_cmd(_, m: Message):
         supabase.table("xeno_keys") \
             .update({"redeemed_by": m.from_user.id}) \
             .eq("key", key).execute()
-        await m.reply(
-            f"✅ Redeemed! Valid until `{exp}`\nUse /menu now.",
-            quote=True,
-            parse_mode="Markdown"
-        )
+        await m.reply(f"✅ Redeemed! Valid until {exp}\nUse /menu now.", quote=True)
     except Exception as e:
         print(f"[ERROR] redeem failed: {e}")
         await m.reply("❌ Something went wrong. Try again later.", quote=True)
