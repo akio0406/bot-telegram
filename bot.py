@@ -591,28 +591,44 @@ async def redeem_cmd(_, m: Message):
 async def redeem_cmd(_, m: Message):
     parts = m.text.strip().split()
     if len(parts) != 2:
-        # plain text avoids any entity‐parsing errors
+        # pure text usage message
         return await m.reply(
-            "❌ Usage: /redeem <key>\n"
+            "❌ Usage: /redeem key\n"
             "Example: /redeem XENO-ABCDEFG1234",
             quote=True
         )
+
     key = parts[1].upper()
     now = datetime.now(timezone.utc)
     try:
-        resp = supabase.table("xeno_keys").select("*").eq("key", key).execute()
+        resp = supabase.table("xeno_keys") \
+            .select("*") \
+            .eq("key", key) \
+            .execute()
+
         if not resp.data:
             return await m.reply("❌ Invalid key.", quote=True)
+
         row = resp.data[0]
         if row.get("redeemed_by"):
             return await m.reply("❌ Already redeemed.", quote=True)
-        exp = datetime.fromisoformat(row["expiry"].replace("Z","+00:00"))
+
+        exp = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
         if exp < now:
             return await m.reply("❌ Key expired.", quote=True)
+
         supabase.table("xeno_keys") \
             .update({"redeemed_by": m.from_user.id}) \
-            .eq("key", key).execute()
-        await m.reply(f"✅ Redeemed! Valid until {exp}\nUse /menu now.", quote=True)
+            .eq("key", key) \
+            .execute()
+
+        # plain-text success
+        return await m.reply(
+            f"✅ Redeemed! Valid until {exp}.\n"
+            "Use /menu now.",
+            quote=True
+        )
+
     except Exception as e:
         print(f"[ERROR] redeem failed: {e}")
         await m.reply("❌ Something went wrong. Try again later.", quote=True)
