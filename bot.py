@@ -536,57 +536,6 @@ async def download_results_file(_, cq: CallbackQuery):
         os.remove(path)
     await cq.message.delete()
 
-@app.on_message(filters.command(["genkey","generate"]) & filters.private & filters.user(ADMIN_ID))
-async def genkey_cmd(_, m: Message):
-    parts = m.text.strip().split()
-    if len(parts) != 2:
-        return await m.reply("❌ Usage: `/genkey <duration>`", quote=True)
-    delta = parse_duration(parts[1])
-    if delta.total_seconds() <= 0:
-        return await m.reply("❌ Invalid duration. Use `1d`,`12h`,`30m`.", quote=True)
-    key    = "XENO-" + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
-    now    = datetime.now(timezone.utc)
-    expiry = now + delta
-    try:
-        supabase.table("xeno_keys").insert({
-            "key": key,
-            "expiry": expiry.isoformat(),
-            "redeemed_by": None,
-            "owner_id": ADMIN_ID,
-            "created": now.isoformat(),
-            "duration": parts[1],
-            "banned": False
-        }).execute()
-        await m.reply(f"✅ Key: `{key}`\nExpires: `{expiry}`\nRedeem with `/redeem {key}`")
-    except Exception as e:
-        print(f"[ERROR] key insert: {e}")
-        await m.reply("❌ Failed to generate key. Try again later.")
-
-@app.on_message(filters.command("redeem") & filters.private)
-async def redeem_cmd(_, m: Message):
-    parts = m.text.strip().split()
-    if len(parts) != 2:
-        return await m.reply("❌ Usage: `/redeem <key>`", quote=True)
-    key = parts[1].upper()
-    now = datetime.now(timezone.utc)
-    try:
-        resp = supabase.table("xeno_keys").select("*").eq("key", key).execute()
-        if not resp.data:
-            return await m.reply("❌ Invalid key.")
-        row = resp.data[0]
-        if row.get("redeemed_by"):
-            return await m.reply("❌ Already redeemed.")
-        exp = datetime.fromisoformat(row["expiry"].replace("Z","+00:00"))
-        if exp < now:
-            return await m.reply("❌ Key expired.")
-        supabase.table("xeno_keys") \
-            .update({"redeemed_by": m.from_user.id}) \
-            .eq("key", key).execute()
-        await m.reply(f"✅ Redeemed! Valid until {exp}\nUse /menu now.")
-    except Exception as e:
-        print(f"[ERROR] redeem failed: {e}")
-        await m.reply("❌ Something went wrong. Try again later.")
-
 @app.on_message(filters.command("redeem") & filters.private)
 async def redeem_cmd(_, m: Message):
     parts = m.text.strip().split()
