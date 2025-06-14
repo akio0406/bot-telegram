@@ -834,74 +834,71 @@ async def admin_flow_handler(_, m: Message):
 @app.on_callback_query(filters.regex("^admin_show_stats$") & filters.user(ADMIN_ID))
 async def admin_show_stats_cb(_, cq: CallbackQuery):
     await cq.answer()
-    # safely clear buttons
     try:
         await cq.message.edit_reply_markup(None)
     except:
         pass
 
-    # fetch every key
+    # fetch all keys
     resp = supabase.table("xeno_keys").select("*").execute()
     rows = resp.data or []
 
     total_keys    = len(rows)
     redeemed_rows = [r for r in rows if r.get("redeemed_by")]
     unredeemed    = total_keys - len(redeemed_rows)
+    now           = datetime.now(timezone.utc)
 
-    # build a Markdown report
-    report = [
-        "📊 *BOT STATS*",
+    # build a plain‐text report
+    lines = [
+        "📊 BOT STATS",
         "",
-        f"🔑 Total keys: `{total_keys}`",
-        f"✅ Redeemed:     `{len(redeemed_rows)}`",
-        f"❌ Unredeemed:   `{unredeemed}`",
+        f"🔑 Total keys: {total_keys}",
+        f"✅ Redeemed:    {len(redeemed_rows)}",
+        f"❌ Unredeemed:  {unredeemed}",
         "",
-        "👤 *Redeemed Users:*",
+        "👤 Redeemed Users:",
         ""
     ]
-    now = datetime.now(timezone.utc)
 
     for r in redeemed_rows:
-        key       = r["key"]
-        uid       = r["redeemed_by"]
-        expiry    = datetime.fromisoformat(r["expiry"].replace("Z", "+00:00"))
-        # compute time left
-        rem = expiry - now
+        key    = r["key"]
+        uid    = r["redeemed_by"]
+        expiry = datetime.fromisoformat(r["expiry"].replace("Z","+00:00"))
+        rem    = expiry - now
         if rem.total_seconds() <= 0:
             left = "Expired"
         else:
             days, rem_secs = divmod(int(rem.total_seconds()), 86400)
             hrs, rem_secs  = divmod(rem_secs, 3600)
-            mins, _       = divmod(rem_secs, 60)
+            mins, _        = divmod(rem_secs, 60)
             left = (f"{days}d {hrs}h {mins}m" if days
                    else f"{hrs}h {mins}m" if hrs
                    else f"{mins}m")
 
-        # try to fetch username
         try:
             user = await cq.client.get_users(uid)
-            uname = f"@{user.username}" if user.username else "(no username)"
+            uname = "@" + user.username if user.username else "(no username)"
         except:
             uname = "(unknown)"
 
-        report += [
-            f"• `{uid}` | {uname}",
-            f"   🔑 Key:     `{key}`",
-            f"   ⏳ Expires: `{expiry}`",
-            f"   📆 Left:    `{left}`",
+        lines += [
+            f"- {uid} {uname}",
+            f"   • Key:    {key}",
+            f"   • Expires: {expiry}",
+            f"   • Left:    {left}",
             ""
         ]
 
-    text = "\n".join(report)
+    report = "\n".join(lines)
 
-    # if too long, send as file
-    if len(text) > 4000:
+    # if too long, send as a file
+    if len(report) > 4000:
         with open("stats.txt", "w", encoding="utf-8") as f:
-            f.write(text)
+            f.write(report)
         await cq.message.reply_document("stats.txt", caption="📊 Full stats")
         os.remove("stats.txt")
     else:
-        await cq.message.reply(text, parse_mode="Markdown")
+        await cq.message.reply(report)
         
 if __name__ == "__main__":
     app.run()
