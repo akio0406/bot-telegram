@@ -600,62 +600,66 @@ async def redeem_cmd(_, m: Message):
         await m.reply("❌ Something went wrong. Try again later.", quote=True)
 
 
-# in-memory admin flow state
+# in‐memory admin flow state
 admin_state: dict[int, str] = {}
 
-# — /adminmenu starts the “generate‐key” flow —
+# — /adminmenu: show buttons only —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
-    admin_state[m.from_user.id] = "await_duration"
-    await m.reply(
-        "🛠 Admin Menu – enter the duration for the new key (e.g. 1d, 12h, 30m):",
-        quote=True
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📤 Generate Key", callback_data="admin_genkey")
+    ]])
+    await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
+
+# — on “Generate Key” button press: ask for duration —
+@app.on_callback_query(filters.regex("^admin_genkey$") & filters.user(ADMIN_ID))
+async def admin_genkey_cb(_, cq: CallbackQuery):
+    await cq.answer()  # remove “loading…”
+    admin_state[cq.from_user.id] = "await_duration"
+    await cq.message.reply(
+        "🛠 You chose Generate Key – now enter duration (e.g. 1d, 12h, 30m):"
     )
 
 # — catch the next text from admin as the duration —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
 async def admin_duration_handler(_, m: Message):
     if admin_state.get(m.from_user.id) != "await_duration":
-        return  # not in the key-generation flow
+        return  # not in the key‐generation flow
 
-    code = m.text.strip()
+    code  = m.text.strip()
     delta = parse_duration(code)
     if delta.total_seconds() <= 0:
-        return await m.reply(
-            "❌ Invalid duration. Enter 1d, 12h, or 30m.",
-            quote=True
-        )
+        return await m.reply("❌ Invalid duration. Enter 1d, 12h, or 30m.", quote=True)
 
     # generate & store the key
-    key = "XENO-" + "".join(random.choices(
-        "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10
-    ))
+    key    = "XENO-" + "".join(random.choices(
+                 "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10
+             ))
     now    = datetime.now(timezone.utc)
     expiry = now + delta
 
     try:
         supabase.table("xeno_keys").insert({
-            "key": key,
-            "expiry": expiry.isoformat(),
-            "redeemed_by": None,
-            "owner_id": ADMIN_ID,
-            "created": now.isoformat(),
-            "duration": code,
-            "banned": False
+            "key":          key,
+            "expiry":       expiry.isoformat(),
+            "redeemed_by":  None,
+            "owner_id":     ADMIN_ID,
+            "created":      now.isoformat(),
+            "duration":     code,
+            "banned":       False
         }).execute()
 
         await m.reply(
             f"✅ Generated Key: {key}\n"
             f"Expires at: {expiry}\n"
-            "Users redeem with: /redeem " + key,
+            f"Users redeem with: /redeem {key}",
             quote=True
         )
     except Exception as e:
         print(f"[ERROR] admin genkey: {e}")
         await m.reply("❌ Failed to create key. Try again later.", quote=True)
-
-    # clear the flow state
-    admin_state.pop(m.from_user.id, None)
+    finally:
+        admin_state.pop(m.from_user.id, None)
 
 if __name__ == "__main__":
     app.run()
