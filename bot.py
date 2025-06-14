@@ -222,24 +222,30 @@ async def remove_url_command(_, m: Message):
 
 # — Unified file handler —
 @app.on_message(filters.document & filters.private)
+@app.on_message(filters.document & filters.private)
 async def file_handler(bot: Client, m: Message):
     uid  = m.from_user.id
-    mode = user_state.pop(uid, None)
+    mode = user_state.get(uid)                       # ← use get()
     if not mode:
         return await m.reply(
-            "⚠️ First choose Encrypt, Decrypt, Search, Remove URLs, Remove Duplicates or Merge via /menu."
+            "⚠️ First choose action via /menu."
         )
 
     if mode == "encrypt":
         await do_encrypt(bot, m)
+        user_state.pop(uid, None)                    # ← clear after encrypt
     elif mode == "decrypt":
         await do_decrypt(bot, m)
+        user_state.pop(uid, None)
     elif mode == "removeurl":
         await process_removeurl_file(bot, m)
+        user_state.pop(uid, None)
     elif mode == "removedupe":
         await process_remove_dupe_file(bot, m)
+        user_state.pop(uid, None)
     elif mode == "merge":
-        await handle_merge_file(bot, m)
+        await handle_merge_file(bot, m)              # ← do NOT clear here
+
 
 async def do_encrypt(bot: Client, m: Message):
     doc = m.document
@@ -291,7 +297,6 @@ async def do_decrypt(bot: Client, m: Message):
         if os.path.exists(out_fn): os.remove(out_fn)
 
 async def process_removeurl_file(bot: Client, m: Message):
-    """Strip prefixes so only user:pass remains, write to removed_url_of_<filename>."""
     doc = m.document
     if not doc.file_name.lower().endswith((".txt", ".py")):
         return await m.reply("❌ Only .txt/.py allowed.")
@@ -302,18 +307,22 @@ async def process_removeurl_file(bot: Client, m: Message):
     path = await bot.download_media(m)
     await prog.edit("➖ Removing prefixes…")
 
-    # Read & clean
-    cleaned_lines = []
+    cleaned = []
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        for raw in f:
-            line = raw.rstrip("\n")
-            if not line.strip():
-                continue
+        for line in f:
+            line = line.rstrip("\n")
             parts = line.split(":")
-            # if there's at least user:pass, grab the last two segments
             if len(parts) >= 2:
-                cleaned = ":".join(parts[-2:])
-                cleaned_lines.append(cleaned)
+                cleaned.append(":".join(parts[-2:]))
+
+    out_fn = f"removed_url_of_{doc.file_name}"
+    with open(out_fn, "w", encoding="utf-8") as f:
+        f.write("\n".join(cleaned))
+
+    await bot.send_document(m.chat.id, out_fn, caption="✅ URLs stripped—user:pass only.")
+    await prog.delete()
+    os.remove(path)
+    os.remove(out_fn)
 
 async def process_remove_dupe_file(bot: Client, m: Message):
     file = m.document
@@ -400,14 +409,11 @@ async def finish_merge(client: Client, m: Message):
     user_id = m.from_user.id
     session = merge_sessions.pop(user_id, None)
     user_state.pop(user_id, None)
-
     if not session:
-        return await m.reply("⚠️ No files merged. Use /menu → Merge first.")
-
+        return await m.reply("⚠️ No merge in progress—use /menu → Merge first.")
     out_fn = "merged_results.txt"
     with open(out_fn, "w", encoding="utf-8") as f:
         f.write("\n".join(session))
-
     await client.send_document(m.chat.id, out_fn, caption="✅ Here’s your merged file!")
     os.remove(out_fn)
 
