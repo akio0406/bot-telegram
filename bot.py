@@ -222,7 +222,6 @@ async def remove_url_command(_, m: Message):
 
 # — Unified file handler —
 @app.on_message(filters.document & filters.private)
-@app.on_message(filters.document & filters.private)
 async def file_handler(bot: Client, m: Message):
     uid  = m.from_user.id
     mode = user_state.get(uid)                       # ← use get()
