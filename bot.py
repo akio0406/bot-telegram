@@ -600,43 +600,62 @@ async def redeem_cmd(_, m: Message):
         await m.reply("❌ Something went wrong. Try again later.", quote=True)
 
 
-# in‐memory admin flow state
+# — single in‐memory admin flow state —
 admin_state: dict[int, str] = {}
 
-# — /adminmenu: add “Remove Expired Keys” alongside your existing buttons —
+# — /adminmenu: show admin actions once only —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📤 Generate Key",     callback_data="admin_genkey"),
-            InlineKeyboardButton("❌ Remove Key",       callback_data="admin_removekey"),
+            InlineKeyboardButton("📤 Generate Key",   callback_data="admin_genkey"),
+            InlineKeyboardButton("❌ Remove Key",     callback_data="admin_removekey"),
         ],
         [
-            InlineKeyboardButton("⌛ Remove Expired",   callback_data="admin_remove_expired"),
+            InlineKeyboardButton("⌛ Remove Expired", callback_data="admin_remove_expired"),
         ],
     ])
     await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
 
-# — on “Generate Key” button press: ask for duration —
+# — Generate Key button → ask for duration —
 @app.on_callback_query(filters.regex("^admin_genkey$") & filters.user(ADMIN_ID))
 async def admin_genkey_cb(_, cq: CallbackQuery):
     await cq.answer()
+    await cq.message.edit_reply_markup(None)
     admin_state[cq.from_user.id] = "await_duration"
-    await cq.message.reply("🛠 Enter duration for the new key (e.g. 1d, 12h, 30m):")
+    await cq.message.reply("🛠 Enter duration (e.g. 1d, 12h, 30m):")
 
-# — on “Remove Key” button press: ask for key string —
+# — Remove Key button → ask for key to delete —
 @app.on_callback_query(filters.regex("^admin_removekey$") & filters.user(ADMIN_ID))
 async def admin_removekey_cb(_, cq: CallbackQuery):
     await cq.answer()
+    await cq.message.edit_reply_markup(None)
     admin_state[cq.from_user.id] = "await_remove_key"
-    await cq.message.reply("🛠 Enter the exact key you want to remove (e.g. XENO-ABCDEFG1234):")
+    await cq.message.reply("🛠 Send the exact key to remove (e.g. XENO-ABCDEFG1234):")
 
-# — catch the next text from admin for both flows —
+# — Remove Expired button → sweep old rows immediately —
+@app.on_callback_query(filters.regex("^admin_remove_expired$") & filters.user(ADMIN_ID))
+async def admin_remove_expired_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+
+    now = datetime.now(timezone.utc)
+    removed = 0
+    resp = supabase.table("xeno_keys").select("key, expiry").execute()
+    for row in resp.data or []:
+        exp = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
+        if exp < now:
+            supabase.table("xeno_keys").delete().eq("key", row["key"]).execute()
+            removed += 1
+
+    await cq.message.reply(f"✅ Removed {removed} expired key(s).")
+
+# — text‐handler for the two multi‐step flows —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
 async def admin_flow_handler(_, m: Message):
     flow = admin_state.get(m.from_user.id)
+
     if flow == "await_duration":
-        # generate key flow
         code  = m.text.strip()
         delta = parse_duration(code)
         if delta.total_seconds() <= 0:
@@ -646,7 +665,6 @@ async def admin_flow_handler(_, m: Message):
                      "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
         now    = datetime.now(timezone.utc)
         expiry = now + delta
-
         try:
             supabase.table("xeno_keys").insert({
                 "key":         key,
@@ -668,58 +686,20 @@ async def admin_flow_handler(_, m: Message):
             await m.reply("❌ Failed to create key. Try again later.", quote=True)
 
     elif flow == "await_remove_key":
-        # remove key flow
-        key = m.text.strip().upper()
-        # check existence
-        resp = supabase.table("xeno_keys") \
-            .select("*") \
-            .eq("key", key) \
-            .execute()
+        key  = m.text.strip().upper()
+        resp = supabase.table("xeno_keys").select("key").eq("key", key).execute()
         if not resp.data:
             await m.reply("❌ No such key found.", quote=True)
         else:
             try:
-                supabase.table("xeno_keys") \
-                    .delete() \
-                    .eq("key", key) \
-                    .execute()
-                await m.reply(f"✅ Key {key} removed from database.", quote=True)
+                supabase.table("xeno_keys").delete().eq("key", key).execute()
+                await m.reply(f"✅ Key {key} removed.", quote=True)
             except Exception as e:
                 print(f"[ERROR] admin removekey: {e}")
                 await m.reply("❌ Failed to remove key. Try again later.", quote=True)
 
-    # clear the flow state in either case
+    # clear the flow state in _any_ case
     admin_state.pop(m.from_user.id, None)
-
-# — on “Remove Expired Keys” button press: run cleanup —
-@app.on_callback_query(filters.regex("^admin_remove_expired$") & filters.user(ADMIN_ID))
-async def admin_remove_expired_cb(_, cq: CallbackQuery):
-    await cq.answer()  # dismiss the loading spinner
-
-    try:
-        # fetch all unremoved keys
-        now_iso = datetime.now(timezone.utc).isoformat()
-        resp = supabase.table("xeno_keys") \
-            .select("key, expiry") \
-            .execute()
-
-        removed = 0
-        for row in resp.data or []:
-            # parse expiry
-            expiry = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
-            if expiry < datetime.now(timezone.utc):
-                # delete expired row
-                supabase.table("xeno_keys") \
-                    .delete() \
-                    .eq("key", row["key"]) \
-                    .execute()
-                removed += 1
-
-        await cq.message.reply(f"✅ Removed {removed} expired key(s).")
-
-    except Exception as e:
-        print(f"[ERROR] admin remove_expired: {e}")
-        await cq.message.reply(f"❌ Error removing expired keys: {e}")
         
 if __name__ == "__main__":
     app.run()
