@@ -537,85 +537,102 @@ async def download_results_file(_, cq: CallbackQuery):
         os.remove(path)
     await cq.message.delete()
 
-# — Updated /redeem to enforce one‐key‐per‐user —
+# — /redeem (enforce one-key-per-user) —
 @app.on_message(filters.command("redeem") & filters.private)
 async def redeem_cmd(_, m: Message):
     parts = m.text.strip().split()
     if len(parts) != 2:
         return await m.reply(
-            "❌ Usage: /redeem key\n"
+            "❌ Usage: /redeem KEY\n"
             "Example: /redeem XENO-ABCDEFG1234",
             quote=True
         )
 
     uid = m.from_user.id
-    # check if user already has a valid key
     now = datetime.now(timezone.utc)
+
+    # 1) prevent multiple active keys
     resp0 = supabase.table("xeno_keys") \
         .select("expiry") \
         .eq("redeemed_by", uid) \
         .eq("banned", False) \
         .execute()
-    for row in (resp0.data or []):
-        exp = datetime.fromisoformat(row["expiry"].replace("Z","+00:00"))
-        if exp > now:
-            return await m.reply("❌ You already have an active key.", quote=True)
 
-    # now redeem the new one
+    for row in (resp0.data or []):
+        exp = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
+        if exp > now:
+            return await m.reply(
+                "❌ You already have an active key.",
+                quote=True
+            )
+
+    # 2) redeem the requested key
     key = parts[1].upper()
     try:
         resp = supabase.table("xeno_keys") \
             .select("*") \
             .eq("key", key) \
             .execute()
+
         if not resp.data:
             return await m.reply("❌ Invalid key.", quote=True)
+
         row = resp.data[0]
         if row.get("redeemed_by"):
             return await m.reply("❌ That key is already redeemed.", quote=True)
-        exp = datetime.fromisoformat(row["expiry"].replace("Z","+00:00"))
+
+        exp = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
         if exp < now:
             return await m.reply("❌ Key expired.", quote=True)
 
         supabase.table("xeno_keys") \
             .update({"redeemed_by": uid}) \
-            .eq("key", key).execute()
+            .eq("key", key) \
+            .execute()
 
-        await m.reply(f"✅ Success! Your new key is valid until {exp}.", quote=True)
+        await m.reply(
+            f"✅ Redeemed! Your key is valid until {exp}.",
+            quote=True
+        )
+
     except Exception as e:
         print(f"[ERROR] redeem failed: {e}")
         await m.reply("❌ Something went wrong. Try again later.", quote=True)
 
+
+# in-memory admin flow state
+admin_state: dict[int, str] = {}
+
+# — /adminmenu starts the “generate‐key” flow —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
-    # set state so next text from admin is treated as duration
     admin_state[m.from_user.id] = "await_duration"
     await m.reply(
-        "🛠 Admin Menu – please enter a duration for the new key, e.g. `1d`, `12h`, or `30m`.",
+        "🛠 Admin Menu – enter the duration for the new key (e.g. 1d, 12h, 30m):",
         quote=True
     )
 
-# — Handle Admin’s duration reply —
+# — catch the next text from admin as the duration —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
 async def admin_duration_handler(_, m: Message):
-    state = admin_state.get(m.from_user.id)
-    if state != "await_duration":
-        return  # not in this flow, ignore
+    if admin_state.get(m.from_user.id) != "await_duration":
+        return  # not in the key-generation flow
 
     code = m.text.strip()
     delta = parse_duration(code)
     if delta.total_seconds() <= 0:
         return await m.reply(
-            "❌ Invalid duration. Please enter `1d`, `12h`, or `30m`.",
+            "❌ Invalid duration. Enter 1d, 12h, or 30m.",
             quote=True
         )
 
-    # generate the key
+    # generate & store the key
     key = "XENO-" + "".join(random.choices(
         "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10
     ))
     now    = datetime.now(timezone.utc)
     expiry = now + delta
+
     try:
         supabase.table("xeno_keys").insert({
             "key": key,
@@ -626,16 +643,18 @@ async def admin_duration_handler(_, m: Message):
             "duration": code,
             "banned": False
         }).execute()
+
         await m.reply(
-            f"✅ Generated Key: {key}\nExpires at: {expiry}\n"
-            f"Users can redeem it with `/redeem {key}`",
+            f"✅ Generated Key: {key}\n"
+            f"Expires at: {expiry}\n"
+            "Users redeem with: /redeem " + key,
             quote=True
         )
     except Exception as e:
         print(f"[ERROR] admin genkey: {e}")
         await m.reply("❌ Failed to create key. Try again later.", quote=True)
 
-    # clear state
+    # clear the flow state
     admin_state.pop(m.from_user.id, None)
 
 if __name__ == "__main__":
