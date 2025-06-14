@@ -622,17 +622,18 @@ async def start_flow(cq: CallbackQuery, flow: str, prompt: str):
 async def adminmenu_cmd(_, m: Message):
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📤 Generate Key",   callback_data="admin_genkey"),
-            InlineKeyboardButton("❌ Remove Key",     callback_data="admin_removekey"),
+            InlineKeyboardButton("📤 Generate Key",     callback_data="admin_genkey"),
+            InlineKeyboardButton("❌ Remove Key",       callback_data="admin_removekey"),
         ],
         [
-            InlineKeyboardButton("⌛ Remove Expired", callback_data="admin_remove_expired"),
-            InlineKeyboardButton("🗓 Extend Key",     callback_data="admin_extend_key"),
+            InlineKeyboardButton("⌛ Remove Expired",   callback_data="admin_remove_expired"),
+            InlineKeyboardButton("🗓 Extend Key",       callback_data="admin_extend_key"),
         ],
         [
-            InlineKeyboardButton("⛔ Ban User",       callback_data="admin_ban_user"),
-            InlineKeyboardButton("✔️ Unban User",     callback_data="admin_unban_user"),
-            InlineKeyboardButton("📋 Show Banlist",   callback_data="admin_show_banlist"),
+            InlineKeyboardButton("⛔ Ban User",         callback_data="admin_ban_user"),
+            InlineKeyboardButton("✔️ Unban User",       callback_data="admin_unban_user"),
+            InlineKeyboardButton("📋 Show Banlist",     callback_data="admin_show_banlist"),
+            InlineKeyboardButton("📈 Show Stats",       callback_data="admin_show_stats"),
         ],
     ])
     await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
@@ -829,7 +830,78 @@ async def admin_flow_handler(_, m: Message):
     # clear the flow state
     admin_state.pop(m.from_user.id, None)
 
+# 6) Handle the “Show Stats” callback
+@app.on_callback_query(filters.regex("^admin_show_stats$") & filters.user(ADMIN_ID))
+async def admin_show_stats_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    # safely clear buttons
+    try:
+        await cq.message.edit_reply_markup(None)
+    except:
+        pass
 
+    # fetch every key
+    resp = supabase.table("xeno_keys").select("*").execute()
+    rows = resp.data or []
+
+    total_keys    = len(rows)
+    redeemed_rows = [r for r in rows if r.get("redeemed_by")]
+    unredeemed    = total_keys - len(redeemed_rows)
+
+    # build a Markdown report
+    report = [
+        "📊 *BOT STATS*",
+        "",
+        f"🔑 Total keys: `{total_keys}`",
+        f"✅ Redeemed:     `{len(redeemed_rows)}`",
+        f"❌ Unredeemed:   `{unredeemed}`",
+        "",
+        "👤 *Redeemed Users:*",
+        ""
+    ]
+    now = datetime.now(timezone.utc)
+
+    for r in redeemed_rows:
+        key       = r["key"]
+        uid       = r["redeemed_by"]
+        expiry    = datetime.fromisoformat(r["expiry"].replace("Z", "+00:00"))
+        # compute time left
+        rem = expiry - now
+        if rem.total_seconds() <= 0:
+            left = "Expired"
+        else:
+            days, rem_secs = divmod(int(rem.total_seconds()), 86400)
+            hrs, rem_secs  = divmod(rem_secs, 3600)
+            mins, _       = divmod(rem_secs, 60)
+            left = (f"{days}d {hrs}h {mins}m" if days
+                   else f"{hrs}h {mins}m" if hrs
+                   else f"{mins}m")
+
+        # try to fetch username
+        try:
+            user = await cq.client.get_users(uid)
+            uname = f"@{user.username}" if user.username else "(no username)"
+        except:
+            uname = "(unknown)"
+
+        report += [
+            f"• `{uid}` | {uname}",
+            f"   🔑 Key:     `{key}`",
+            f"   ⏳ Expires: `{expiry}`",
+            f"   📆 Left:    `{left}`",
+            ""
+        ]
+
+    text = "\n".join(report)
+
+    # if too long, send as file
+    if len(text) > 4000:
+        with open("stats.txt", "w", encoding="utf-8") as f:
+            f.write(text)
+        await cq.message.reply_document("stats.txt", caption="📊 Full stats")
+        os.remove("stats.txt")
+    else:
+        await cq.message.reply(text, parse_mode="Markdown")
         
 if __name__ == "__main__":
     app.run()
