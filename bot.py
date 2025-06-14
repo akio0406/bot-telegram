@@ -606,60 +606,85 @@ admin_state: dict[int, str] = {}
 # — /adminmenu: show buttons only —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("📤 Generate Key", callback_data="admin_genkey")
-    ]])
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 Generate Key", callback_data="admin_genkey")],
+        [InlineKeyboardButton("❌ Remove Key",   callback_data="admin_removekey")],
+    ])
     await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
 
 # — on “Generate Key” button press: ask for duration —
 @app.on_callback_query(filters.regex("^admin_genkey$") & filters.user(ADMIN_ID))
 async def admin_genkey_cb(_, cq: CallbackQuery):
-    await cq.answer()  # remove “loading…”
+    await cq.answer()
     admin_state[cq.from_user.id] = "await_duration"
-    await cq.message.reply(
-        "🛠 You chose Generate Key – now enter duration (e.g. 1d, 12h, 30m):"
-    )
+    await cq.message.reply("🛠 Enter duration for the new key (e.g. 1d, 12h, 30m):")
 
-# — catch the next text from admin as the duration —
+# — on “Remove Key” button press: ask for key string —
+@app.on_callback_query(filters.regex("^admin_removekey$") & filters.user(ADMIN_ID))
+async def admin_removekey_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    admin_state[cq.from_user.id] = "await_remove_key"
+    await cq.message.reply("🛠 Enter the exact key you want to remove (e.g. XENO-ABCDEFG1234):")
+
+# — catch the next text from admin for both flows —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
-async def admin_duration_handler(_, m: Message):
-    if admin_state.get(m.from_user.id) != "await_duration":
-        return  # not in the key‐generation flow
+async def admin_flow_handler(_, m: Message):
+    flow = admin_state.get(m.from_user.id)
+    if flow == "await_duration":
+        # generate key flow
+        code  = m.text.strip()
+        delta = parse_duration(code)
+        if delta.total_seconds() <= 0:
+            return await m.reply("❌ Invalid duration. Enter 1d, 12h, or 30m.", quote=True)
 
-    code  = m.text.strip()
-    delta = parse_duration(code)
-    if delta.total_seconds() <= 0:
-        return await m.reply("❌ Invalid duration. Enter 1d, 12h, or 30m.", quote=True)
+        key    = "XENO-" + "".join(random.choices(
+                     "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
+        now    = datetime.now(timezone.utc)
+        expiry = now + delta
 
-    # generate & store the key
-    key    = "XENO-" + "".join(random.choices(
-                 "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10
-             ))
-    now    = datetime.now(timezone.utc)
-    expiry = now + delta
+        try:
+            supabase.table("xeno_keys").insert({
+                "key":         key,
+                "expiry":      expiry.isoformat(),
+                "redeemed_by": None,
+                "owner_id":    ADMIN_ID,
+                "created":     now.isoformat(),
+                "duration":    code,
+                "banned":      False
+            }).execute()
+            await m.reply(
+                f"✅ Generated Key: {key}\n"
+                f"Expires at: {expiry}\n"
+                f"Users redeem with: /redeem {key}",
+                quote=True
+            )
+        except Exception as e:
+            print(f"[ERROR] admin genkey: {e}")
+            await m.reply("❌ Failed to create key. Try again later.", quote=True)
 
-    try:
-        supabase.table("xeno_keys").insert({
-            "key":          key,
-            "expiry":       expiry.isoformat(),
-            "redeemed_by":  None,
-            "owner_id":     ADMIN_ID,
-            "created":      now.isoformat(),
-            "duration":     code,
-            "banned":       False
-        }).execute()
+    elif flow == "await_remove_key":
+        # remove key flow
+        key = m.text.strip().upper()
+        # check existence
+        resp = supabase.table("xeno_keys") \
+            .select("*") \
+            .eq("key", key) \
+            .execute()
+        if not resp.data:
+            await m.reply("❌ No such key found.", quote=True)
+        else:
+            try:
+                supabase.table("xeno_keys") \
+                    .delete() \
+                    .eq("key", key) \
+                    .execute()
+                await m.reply(f"✅ Key {key} removed from database.", quote=True)
+            except Exception as e:
+                print(f"[ERROR] admin removekey: {e}")
+                await m.reply("❌ Failed to remove key. Try again later.", quote=True)
 
-        await m.reply(
-            f"✅ Generated Key: {key}\n"
-            f"Expires at: {expiry}\n"
-            f"Users redeem with: /redeem {key}",
-            quote=True
-        )
-    except Exception as e:
-        print(f"[ERROR] admin genkey: {e}")
-        await m.reply("❌ Failed to create key. Try again later.", quote=True)
-    finally:
-        admin_state.pop(m.from_user.id, None)
+    # clear the flow state in either case
+    admin_state.pop(m.from_user.id, None)
 
 if __name__ == "__main__":
     app.run()
