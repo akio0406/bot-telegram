@@ -59,6 +59,7 @@ app = Client(
     bot_token=BOT_TOKEN,
 )
 
+admin_state: dict[int, str] = {}
 # — Constants & State —
 MAX_SIZE   = 10 * 1024 * 1024  # 10MB
 user_state = {}                # user_id → "encrypt" or "decrypt"
@@ -536,81 +537,83 @@ async def download_results_file(_, cq: CallbackQuery):
         os.remove(path)
     await cq.message.delete()
 
+# — Updated /redeem to enforce one‐key‐per‐user —
 @app.on_message(filters.command("redeem") & filters.private)
 async def redeem_cmd(_, m: Message):
     parts = m.text.strip().split()
     if len(parts) != 2:
-        # pure text usage message
         return await m.reply(
             "❌ Usage: /redeem key\n"
             "Example: /redeem XENO-ABCDEFG1234",
             quote=True
         )
 
-    key = parts[1].upper()
+    uid = m.from_user.id
+    # check if user already has a valid key
     now = datetime.now(timezone.utc)
+    resp0 = supabase.table("xeno_keys") \
+        .select("expiry") \
+        .eq("redeemed_by", uid) \
+        .eq("banned", False) \
+        .execute()
+    for row in (resp0.data or []):
+        exp = datetime.fromisoformat(row["expiry"].replace("Z","+00:00"))
+        if exp > now:
+            return await m.reply("❌ You already have an active key.", quote=True)
+
+    # now redeem the new one
+    key = parts[1].upper()
     try:
         resp = supabase.table("xeno_keys") \
             .select("*") \
             .eq("key", key) \
             .execute()
-
         if not resp.data:
             return await m.reply("❌ Invalid key.", quote=True)
-
         row = resp.data[0]
         if row.get("redeemed_by"):
-            return await m.reply("❌ Already redeemed.", quote=True)
-
-        exp = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
+            return await m.reply("❌ That key is already redeemed.", quote=True)
+        exp = datetime.fromisoformat(row["expiry"].replace("Z","+00:00"))
         if exp < now:
             return await m.reply("❌ Key expired.", quote=True)
 
         supabase.table("xeno_keys") \
-            .update({"redeemed_by": m.from_user.id}) \
-            .eq("key", key) \
-            .execute()
+            .update({"redeemed_by": uid}) \
+            .eq("key", key).execute()
 
-        # plain-text success
-        return await m.reply(
-            f"✅ Redeemed! Valid until {exp}.\n"
-            "Use /menu now.",
-            quote=True
-        )
-
+        await m.reply(f"✅ Success! Your new key is valid until {exp}.", quote=True)
     except Exception as e:
         print(f"[ERROR] redeem failed: {e}")
         await m.reply("❌ Something went wrong. Try again later.", quote=True)
 
-# — Admin Menu (admins only) —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 Generate Key", switch_inline_query_current_chat="/genkey ")],
-    ])
+    # set state so next text from admin is treated as duration
+    admin_state[m.from_user.id] = "await_duration"
     await m.reply(
-        "🛠 Admin Menu – tap “Generate Key” then type duration (e.g. `1d`).",
-        reply_markup=kb
+        "🛠 Admin Menu – please enter a duration for the new key, e.g. `1d`, `12h`, or `30m`.",
+        quote=True
     )
 
-# — Admin-only /genkey & /generate —
-@app.on_message(filters.command(["genkey","generate"]) & filters.private & filters.user(ADMIN_ID))
-async def genkey_cmd(_, m: Message):
-    parts = m.text.strip().split()
-    if len(parts) != 2:
-        return await m.reply(
-            "❌ Usage: `/genkey <duration>`",
-            quote=True,
-            parse_mode="Markdown"
-        )
-    delta = parse_duration(parts[1])
+# — Handle Admin’s duration reply —
+@app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
+async def admin_duration_handler(_, m: Message):
+    state = admin_state.get(m.from_user.id)
+    if state != "await_duration":
+        return  # not in this flow, ignore
+
+    code = m.text.strip()
+    delta = parse_duration(code)
     if delta.total_seconds() <= 0:
         return await m.reply(
-            "❌ Invalid duration. Use `1d`, `12h`, or `30m`.",
-            quote=True,
-            parse_mode="Markdown"
+            "❌ Invalid duration. Please enter `1d`, `12h`, or `30m`.",
+            quote=True
         )
-    key    = "XENO-" + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
+
+    # generate the key
+    key = "XENO-" + "".join(random.choices(
+        "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10
+    ))
     now    = datetime.now(timezone.utc)
     expiry = now + delta
     try:
@@ -620,17 +623,20 @@ async def genkey_cmd(_, m: Message):
             "redeemed_by": None,
             "owner_id": ADMIN_ID,
             "created": now.isoformat(),
-            "duration": parts[1],
+            "duration": code,
             "banned": False
         }).execute()
         await m.reply(
-            f"✅ Key: `{key}`\nExpires: `{expiry}`\nRedeem with `/redeem {key}`",
-            quote=True,
-            parse_mode="Markdown"
+            f"✅ Generated Key: {key}\nExpires at: {expiry}\n"
+            f"Users can redeem it with `/redeem {key}`",
+            quote=True
         )
     except Exception as e:
-        print(f"[ERROR] key insert: {e}")
-        await m.reply("❌ Failed to generate key. Try again later.", quote=True)
+        print(f"[ERROR] admin genkey: {e}")
+        await m.reply("❌ Failed to create key. Try again later.", quote=True)
+
+    # clear state
+    admin_state.pop(m.from_user.id, None)
 
 if __name__ == "__main__":
     app.run()
