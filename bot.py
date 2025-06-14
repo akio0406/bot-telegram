@@ -207,9 +207,8 @@ async def on_removedupe_cb(_, cq: CallbackQuery):
 @app.on_callback_query(filters.regex("^menu_myinfo$"))
 async def on_myinfo_cb(_, cq: CallbackQuery):
     uid = cq.from_user.id
-    await cq.answer()
-    await cq.message.edit_reply_markup(None)
 
+    # 1) Fetch the user’s key from Supabase
     resp = supabase.table("xeno_keys") \
         .select("key, expiry") \
         .eq("redeemed_by", uid) \
@@ -219,17 +218,19 @@ async def on_myinfo_cb(_, cq: CallbackQuery):
 
     rows = resp.data or []
     if not rows:
-        return await cq.message.reply("❌ You haven’t redeemed a key yet.")
+        # if they have no key, show an alert popup
+        return await cq.answer("❌ You haven’t redeemed a key yet.", show_alert=True)
 
-    info   = rows[0]
+    info    = rows[0]
     key     = info["key"]
     expiry  = datetime.fromisoformat(info["expiry"].replace("Z","+00:00"))
     now     = datetime.now(timezone.utc)
-    rem     = int((expiry - now).total_seconds())
+    rem_secs = int((expiry - now).total_seconds())
 
-    days, rem    = divmod(rem, 86400)
-    hours, rem   = divmod(rem, 3600)
-    minutes, _   = divmod(rem, 60)
+    days, rem     = divmod(rem_secs, 86400)
+    hours, rem    = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+
     if days:
         dur = f"{days}d {hours}h {minutes}m"
     elif hours:
@@ -237,12 +238,15 @@ async def on_myinfo_cb(_, cq: CallbackQuery):
     else:
         dur = f"{minutes}m"
 
-    # pure text, no parse_mode
-    await cq.message.reply(
-        "🆔 Your Key: "   + key   + "\n"
-        "📅 Expires on: "  + str(expiry)  + "\n"
-        "⏳ Time left: "   + dur
+    # 2) Build a pure‐text info card
+    info_text = (
+        f"🆔 Your Key: {key}\n"
+        f"📅 Expires on: {expiry}\n"
+        f"⏳ Time left: {dur}"
     )
+
+    # 3) Replace the old menu message with this text (and remove its buttons)
+    await cq.message.edit_text(info_text)
 
 # — Fallback commands —
 @app.on_message(filters.command("encrypt") & filters.private)
