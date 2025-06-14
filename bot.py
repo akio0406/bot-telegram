@@ -177,7 +177,7 @@ async def on_removeurl_cb(_, cq: CallbackQuery):
     await cq.message.reply("📂 Send a file containing URLs to remove.")
 
 # — Merge button —
-@app.on_callback_query(filters.regex("^menu_merge$") & restricted())
+@app.on_callback_query(filters.regex("^menu_merge$"))
 async def on_merge_cb(_, cq: CallbackQuery):
     uid = cq.from_user.id
     await cq.answer()
