@@ -253,24 +253,45 @@ async def do_decrypt(bot: Client, m: Message):
         if os.path.exists(out_fn): os.remove(out_fn)
 
 async def process_removeurl_file(bot: Client, m: Message):
-    """Strip URLs from uploaded .txt or .py."""
+    """Strip prefixes so only user:pass remains, write to removed_url_of_<filename>."""
     doc = m.document
     if not doc.file_name.lower().endswith((".txt", ".py")):
         return await m.reply("❌ Only .txt/.py allowed.")
     if doc.file_size > MAX_SIZE:
         return await m.reply("❌ File too large (max 10MB).")
+
     prog = await m.reply("⏳ Downloading…")
     path = await bot.download_media(m)
-    await prog.edit("➖ Removing URLs…")
-    text = open(path, "r", encoding="utf-8", errors="ignore").read()
-    cleaned = re.sub(r"https?://\S+", "[removed]", text)
-    out_fn = f"no_urls_{doc.file_name}"
+    await prog.edit("➖ Removing prefixes…")
+
+    # Read & clean
+    cleaned_lines = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for raw in f:
+            line = raw.rstrip("\n")
+            if not line.strip():
+                continue
+            parts = line.split(":")
+            # if there's at least user:pass, grab the last two segments
+            if len(parts) >= 2:
+                cleaned = ":".join(parts[-2:])
+                cleaned_lines.append(cleaned)
+
+    # Build output filename
+    out_fn = f"removed_url_of_{doc.file_name}"
     with open(out_fn, "w", encoding="utf-8") as f:
-        f.write(cleaned)
-    await bot.send_document(m.chat.id, out_fn, caption="✅ URLs removed.")
+        f.write("\n".join(cleaned_lines))
+
+    # Send back
+    await bot.send_document(m.chat.id, out_fn,
+        caption="✅ Prefixes removed – only user:pass remain."
+    )
+
+    # cleanup
     await prog.delete()
     os.remove(path)
     os.remove(out_fn)
+
 
 # — Search submenus —
 @app.on_callback_query(filters.regex("^expand_garena$"))
