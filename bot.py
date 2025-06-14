@@ -587,42 +587,46 @@ async def redeem_cmd(_, m: Message):
         print(f"[ERROR] redeem failed: {e}")
         await m.reply("❌ Something went wrong. Try again later.")
 
-# — /redeem —
+# — /redeem (any user) —
 @app.on_message(filters.command("redeem") & filters.private)
 async def redeem_cmd(_, m: Message):
     parts = m.text.strip().split()
     if len(parts) != 2:
-        return await m.reply("❌ Usage: `/redeem <key>`", quote=True)
+        # use Markdown so backticks work, and <key> isn’t parsed as HTML
+        return await m.reply(
+            "❌ Usage: `/redeem <key>`",
+            quote=True,
+            parse_mode="Markdown"
+        )
     key = parts[1].upper()
     now = datetime.now(timezone.utc)
     try:
         resp = supabase.table("xeno_keys").select("*").eq("key", key).execute()
         if not resp.data:
-            return await m.reply("❌ Invalid key.")
+            return await m.reply("❌ Invalid key.", quote=True)
         row = resp.data[0]
         if row.get("redeemed_by"):
-            return await m.reply("❌ Already redeemed.")
+            return await m.reply("❌ Already redeemed.", quote=True)
         exp = datetime.fromisoformat(row["expiry"].replace("Z","+00:00"))
         if exp < now:
-            return await m.reply("❌ Key expired.")
+            return await m.reply("❌ Key expired.", quote=True)
         supabase.table("xeno_keys") \
             .update({"redeemed_by": m.from_user.id}) \
             .eq("key", key).execute()
-        await m.reply(f"✅ Redeemed! Valid until {exp}\nUse /menu now.")
+        await m.reply(
+            f"✅ Redeemed! Valid until `{exp}`\nUse /menu now.",
+            quote=True,
+            parse_mode="Markdown"
+        )
     except Exception as e:
         print(f"[ERROR] redeem failed: {e}")
-        await m.reply("❌ Something went wrong. Try again later.")
+        await m.reply("❌ Something went wrong. Try again later.", quote=True)
 
 # — Admin Menu (admins only) —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
     kb = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                text="📤 Generate Key",
-                switch_inline_query_current_chat="/genkey "
-            )
-        ],
+        [InlineKeyboardButton("📤 Generate Key", switch_inline_query_current_chat="/genkey ")],
     ])
     await m.reply(
         "🛠 Admin Menu – tap “Generate Key” then type duration (e.g. `1d`).",
@@ -634,12 +638,19 @@ async def adminmenu_cmd(_, m: Message):
 async def genkey_cmd(_, m: Message):
     parts = m.text.strip().split()
     if len(parts) != 2:
-        return await m.reply("❌ Usage: `/genkey <duration>`", quote=True)
+        return await m.reply(
+            "❌ Usage: `/genkey <duration>`",
+            quote=True,
+            parse_mode="Markdown"
+        )
     delta = parse_duration(parts[1])
     if delta.total_seconds() <= 0:
-        return await m.reply("❌ Invalid duration. Use `1d`,`12h`,`30m`.", quote=True)
-    key    = "XENO-" + "".join(random.choices(
-                 "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
+        return await m.reply(
+            "❌ Invalid duration. Use `1d`, `12h`, or `30m`.",
+            quote=True,
+            parse_mode="Markdown"
+        )
+    key    = "XENO-" + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
     now    = datetime.now(timezone.utc)
     expiry = now + delta
     try:
@@ -653,13 +664,13 @@ async def genkey_cmd(_, m: Message):
             "banned": False
         }).execute()
         await m.reply(
-            f"✅ Key: `{key}`\nExpires: `{expiry}`\n"
-            f"Redeem with `/redeem {key}`",
-            quote=True
+            f"✅ Key: `{key}`\nExpires: `{expiry}`\nRedeem with `/redeem {key}`",
+            quote=True,
+            parse_mode="Markdown"
         )
     except Exception as e:
         print(f"[ERROR] key insert: {e}")
-        await m.reply("❌ Failed to generate key. Try again later.")
+        await m.reply("❌ Failed to generate key. Try again later.", quote=True)
 
 if __name__ == "__main__":
     app.run()
