@@ -5,12 +5,18 @@ import re
 import random
 import base64
 import asyncio
+import functools
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo         # Python 3.9+
 from pyrogram import Client, filters
-from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
 from supabase import create_client, SupabaseException
-from zoneinfo import ZoneInfo        # Python 3.9+
 
 # — Load ENV —
 API_ID    = int(os.getenv("API_ID", "0"))
@@ -57,6 +63,30 @@ app = Client(
 MAX_SIZE   = 10 * 1024 * 1024  # 10MB
 user_state = {}                # user_id → "encrypt" or "decrypt"
 
+# at the top of your file
+def requires_premium(func):
+    @functools.wraps(func)
+    async def wrapper(client, update):
+        # figure out the user & how to reply
+        if isinstance(update, Message):
+            uid = update.from_user.id
+            deny = lambda: update.reply("⛔ Redeem a key first with `/redeem <key>`.") 
+        elif isinstance(update, CallbackQuery):
+            uid = update.from_user.id
+            deny = lambda: update.answer("⛔ Redeem a key first with `/redeem <key>`.", show_alert=True)
+        else:
+            # shouldn’t happen
+            return
+
+        # do the access check
+        if not await check_user_access(uid):
+            return await deny()
+
+        # user is premium, run the real handler
+        return await func(client, update)
+
+    return wrapper
+
 # — Helpers —
 def parse_duration(code: str) -> timedelta:
     try:
@@ -99,209 +129,138 @@ async def start_cmd(_, m: Message):
 
 # — /menu command —
 @app.on_message(filters.command("menu") & filters.private)
+@requires_premium
 async def menu_cmd(_, m: Message):
-    if not await check_user_access(m.from_user.id):
-        return await m.reply("⛔ Redeem a key first with `/redeem <key>`.")
     kb = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔐 Encrypt",          callback_data="menu_encrypt"),
-            InlineKeyboardButton("🔓 Decrypt",          callback_data="menu_decrypt"),
-        ],
-        [
-            InlineKeyboardButton("🔍 Search",           callback_data="menu_search"),
-            InlineKeyboardButton("➖ Remove URLs",       callback_data="menu_removeurl"),
-            InlineKeyboardButton("➗ Remove Duplicates", callback_data="menu_removedupe"),
-            InlineKeyboardButton("🔗 Merge Files",       callback_data="menu_merge"),
-        ],
-        [
-            InlineKeyboardButton("🆔 My Info",          callback_data="menu_myinfo"),
-        ],
+        [InlineKeyboardButton("🔐 Encrypt", callback_data="menu_encrypt"),
+         InlineKeyboardButton("🔓 Decrypt", callback_data="menu_decrypt")],
+        [InlineKeyboardButton("🔍 Search", callback_data="menu_search"),
+         InlineKeyboardButton("➖ Remove URLs", callback_data="menu_removeurl"),
+         InlineKeyboardButton("➗ Remove Dupe", callback_data="menu_removedupe"),
+         InlineKeyboardButton("🔗 Merge Files", callback_data="menu_merge")],
+        [InlineKeyboardButton("🆔 My Info", callback_data="menu_myinfo")]
     ])
-    await m.reply(
-        "♨️ XENO PREMIUM BOT ♨️\nChoose an action:",
-        reply_markup=kb
-    )
+    await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
 
-# — Encrypt button —
+# — Callback button handlers —
 @app.on_callback_query(filters.regex("^menu_encrypt$"))
+@requires_premium
 async def on_encrypt_cb(_, cq: CallbackQuery):
-    uid = cq.from_user.id
     await cq.answer("Encrypt mode activated!")
     await cq.message.edit_reply_markup(None)
-    if not await check_user_access(uid):
-        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
-    user_state[uid] = "encrypt"
+    user_state[cq.from_user.id] = "encrypt"
     await cq.message.reply("📂 Send a `.py` or `.txt` file (max 10MB) to encrypt.")
 
-# — Decrypt button —
 @app.on_callback_query(filters.regex("^menu_decrypt$"))
+@requires_premium
 async def on_decrypt_cb(_, cq: CallbackQuery):
-    uid = cq.from_user.id
     await cq.answer("Decrypt mode activated!")
     await cq.message.edit_reply_markup(None)
-    if not await check_user_access(uid):
-        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
-    user_state[uid] = "decrypt"
+    user_state[cq.from_user.id] = "decrypt"
     await cq.message.reply("📂 Send an encrypted `.py` or `.txt` file to decrypt.")
 
-# — Search button —
 @app.on_callback_query(filters.regex("^menu_search$"))
+@requires_premium
 async def on_search_cb(_, cq: CallbackQuery):
-    uid = cq.from_user.id
     await cq.answer()
     await cq.message.edit_reply_markup(None)
-    if not await check_user_access(uid):
-        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎲 Roblox",          callback_data="keyword_roblox")],
-        [InlineKeyboardButton("🔥 Mobile Legends",  callback_data="keyword_mobilelegends")],
-        [InlineKeyboardButton("💳 Codashop",         callback_data="keyword_codashop")],
-        [InlineKeyboardButton("🛡 Garena",           callback_data="expand_garena")],
-        [InlineKeyboardButton("🌐 Social Media",     callback_data="expand_socmeds")],
-        [InlineKeyboardButton("✉️ Email Providers", callback_data="expand_emails")],
-        [InlineKeyboardButton("🎮 Gaming",           callback_data="expand_gaming")],
+        [InlineKeyboardButton("🎲 Roblox", callback_data="keyword_roblox")],
+        [InlineKeyboardButton("🔥 Mobile Legends", callback_data="keyword_mobilelegends")],
+        [InlineKeyboardButton("💳 Codashop", callback_data="keyword_codashop")],
+        [InlineKeyboardButton("🛡 Garena", callback_data="expand_garena")],
+        [InlineKeyboardButton("🌐 Social Media", callback_data="expand_socmeds")],
+        [InlineKeyboardButton("✉️ Email Prov", callback_data="expand_emails")],
+        [InlineKeyboardButton("🎮 Gaming", callback_data="expand_gaming")],
     ])
-    await cq.message.reply(
-        "🔎 DATABASE SEARCH\n\n📌 Choose a keyword to search:",
-        reply_markup=kb
-    )
+    await cq.message.reply("🔎 DATABASE SEARCH\n\n📌 Choose a keyword:", reply_markup=kb)
 
-# — Remove URLs button —
 @app.on_callback_query(filters.regex("^menu_removeurl$"))
+@requires_premium
 async def on_removeurl_cb(_, cq: CallbackQuery):
-    uid = cq.from_user.id
     await cq.answer("Remove-URLs mode activated!")
     await cq.message.edit_reply_markup(None)
-    if not await check_user_access(uid):
-        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
-    user_state[uid] = "removeurl"
+    user_state[cq.from_user.id] = "removeurl"
     await cq.message.reply("📂 Send a file containing URLs to remove.")
 
-# — Merge button —
 @app.on_callback_query(filters.regex("^menu_merge$"))
+@requires_premium
 async def on_merge_cb(_, cq: CallbackQuery):
-    uid = cq.from_user.id
     await cq.answer()
     await cq.message.edit_reply_markup(None)
-    if not await check_user_access(uid):
-        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
-
-    user_state[uid] = "merge"
+    user_state[cq.from_user.id] = "merge"
     await cq.message.reply(
-        "📂 Send multiple `.txt` files (max 10MB each). I’ll merge them without duplicates. "
-        "When you’re done, type `/done`."
+        "📂 Send multiple `.txt` files. I'll merge them without duplicates. "
+        "When done, type `/done`."
     )
 
-# — Remove Dupe —
 @app.on_callback_query(filters.regex("^menu_removedupe$"))
+@requires_premium
 async def on_removedupe_cb(_, cq: CallbackQuery):
-    uid = cq.from_user.id
     await cq.answer()
     await cq.message.edit_reply_markup(None)
-    if not await check_user_access(uid):
-        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
-    user_state[uid] = "removedupe"
-    await cq.message.reply(
-      "📂 Send a `.txt` file (max 10MB) — I’ll strip out all duplicate lines for you!"
-    )
+    user_state[cq.from_user.id] = "removedupe"
+    await cq.message.reply("📂 Send a `.txt` file—I'll strip duplicate lines!")
 
 @app.on_callback_query(filters.regex("^menu_myinfo$"))
+@requires_premium
 async def on_myinfo_cb(_, cq: CallbackQuery):
+    await cq.answer()
     uid = cq.from_user.id
-    await cq.answer()   # dismiss loading spinner
-
-    # 1) Fetch key & expiry from Supabase
     resp = supabase.table("xeno_keys") \
         .select("key, expiry") \
-        .eq("redeemed_by", uid) \
-        .eq("banned", False) \
-        .limit(1) \
-        .execute()
-
-    if not (rows := resp.data):
+        .eq("redeemed_by", uid).eq("banned", False) \
+        .limit(1).execute()
+    rows = resp.data or []
+    if not rows:
         return await cq.answer("❌ You haven’t redeemed a key yet.", show_alert=True)
 
-    info   = rows[0]
-    # parse expiry as UTC
+    info = rows[0]
     expiry_utc = datetime.fromisoformat(info["expiry"].replace("Z","+00:00"))
     now_utc    = datetime.now(timezone.utc)
+    manila     = ZoneInfo("Asia/Manila")
+    expiry_ph  = expiry_utc.astimezone(manila)
 
-    # convert both to Asia/Manila
-    manila = ZoneInfo("Asia/Manila")
-    expiry_ph = expiry_utc.astimezone(manila)
-    now_ph    = now_utc   .astimezone(manila)
+    secs = int((expiry_utc - now_utc).total_seconds())
+    days, rem  = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, _    = divmod(rem, 60)
+    dur = days and f"{days}d {hours}h {mins}m" or hours and f"{hours}h {mins}m" or f"{mins}m"
 
-    # compute remaining (still in UTC or you can use now_ph—same delta)
-    remaining = expiry_utc - now_utc
-    secs      = int(remaining.total_seconds())
-    days, secs   = divmod(secs, 86400)
-    hours, secs  = divmod(secs, 3600)
-    minutes, _   = divmod(secs, 60)
-    if days:
-        dur = f"{days}d {hours}h {minutes}m"
-    elif hours:
-        dur = f"{hours}h {minutes}m"
-    else:
-        dur = f"{minutes}m"
-
-    # build a pure-text info card in PH time
     text = (
         f"🆔 Your Key: {info['key']}\n"
         f"📅 Expires on (PH): {expiry_ph:%Y-%m-%d %H:%M:%S}\n"
         f"⏳ Time left: {dur}"
     )
-
-    # replace the menu with this info
     await cq.message.edit_text(text)
-
-# — Fallback commands —
-@app.on_message(filters.command("encrypt") & filters.private)
-async def cmd_encrypt(_, m: Message):
-    user_state[m.from_user.id] = "encrypt"
-    await m.reply("📂 Send a `.py` or `.txt` file to encrypt.")
-
-@app.on_message(filters.command("decrypt") & filters.private)
-async def cmd_decrypt(_, m: Message):
-    user_state[m.from_user.id] = "decrypt"
-    await m.reply("📂 Send an encrypted `.py` or `.txt` file to decrypt.")
-
-@app.on_message(filters.command("removeurl") & filters.private)
-async def remove_url_command(_, m: Message):
-    user_state[m.from_user.id] = "removeurl"
-    await m.reply("📂 Send a file containing URLs to remove.")
 
 # — Unified file handler —
 @app.on_message(filters.document & filters.private)
+@requires_premium
 async def file_handler(bot: Client, m: Message):
     uid  = m.from_user.id
-    mode = user_state.get(uid)                       # ← use get()
+    mode = user_state.get(uid)
     if not mode:
-        return await m.reply(
-            "⚠️ First choose action via /menu."
-        )
+        return await m.reply("⚠️ First choose action via /menu.")
 
     if mode == "encrypt":
-        await do_encrypt(bot, m)
-        user_state.pop(uid, None)                    # ← clear after encrypt
+        await do_encrypt(bot, m);   user_state.pop(uid, None)
     elif mode == "decrypt":
-        await do_decrypt(bot, m)
-        user_state.pop(uid, None)
+        await do_decrypt(bot, m);   user_state.pop(uid, None)
     elif mode == "removeurl":
-        await process_removeurl_file(bot, m)
-        user_state.pop(uid, None)
+        await process_removeurl_file(bot, m); user_state.pop(uid, None)
     elif mode == "removedupe":
-        await process_remove_dupe_file(bot, m)
-        user_state.pop(uid, None)
+        await process_remove_dupe_file(bot, m); user_state.pop(uid, None)
     elif mode == "merge":
-        await handle_merge_file(bot, m)              # ← do NOT clear here
+        await handle_merge_file(bot, m)
 
-
-async def do_encrypt(bot: Client, m: Message):
+# — File operation helpers —
+async def do_encrypt(bot, m: Message):
     doc = m.document
     if not doc.file_name.lower().endswith((".py", ".txt")):
         return await m.reply("❌ Only .py/.txt allowed.")
     if doc.file_size > MAX_SIZE:
-        return await m.reply("❌ File too large (max 10MB).")
+        return await m.reply("❌ File too large.")
     prog = await m.reply("⏳ Downloading…")
     path = await bot.download_media(m)
     await prog.edit("🔐 Encrypting…")
@@ -310,7 +269,7 @@ async def do_encrypt(bot: Client, m: Message):
         b64 = base64.b64encode(raw.encode()).decode()
         out_fn = f"encrypted_{doc.file_name}"
         with open(out_fn, "w", encoding="utf-8") as f:
-            f.write(f"import base64\nexec(base64.b64decode('{b64}').decode())\n")
+            f.write(f"import base64\nexec(base64.b64decode('{b64}').decode())")
         await bot.send_document(m.chat.id, out_fn, caption="✅ Encrypted!")
     except Exception as e:
         await prog.edit(f"❌ Encryption error: {e}")
@@ -319,24 +278,22 @@ async def do_encrypt(bot: Client, m: Message):
         os.remove(path)
         if os.path.exists(out_fn): os.remove(out_fn)
 
-async def do_decrypt(bot: Client, m: Message):
+async def do_decrypt(bot, m: Message):
     doc = m.document
     if not doc.file_name.lower().endswith((".py", ".txt")):
         return await m.reply("❌ Only .py/.txt allowed.")
     if doc.file_size > MAX_SIZE:
-        return await m.reply("❌ File too large (max 10MB).")
+        return await m.reply("❌ File too large.")
     prog = await m.reply("⏳ Downloading…")
     path = await bot.download_media(m)
     await prog.edit("🔓 Decrypting…")
     try:
         content = open(path, "r", encoding="utf-8", errors="ignore").read()
         mobj = re.search(r"b64decode\('(.+?)'\)", content)
-        if not mobj:
-            raise ValueError("No payload.")
+        if not mobj: raise ValueError("No payload.")
         dec = base64.b64decode(mobj.group(1)).decode()
         out_fn = f"decrypted_{doc.file_name}"
-        with open(out_fn, "w", encoding="utf-8") as f:
-            f.write(dec)
+        with open(out_fn, "w", encoding="utf-8") as f: f.write(dec)
         await bot.send_document(m.chat.id, out_fn, caption="✅ Decrypted!")
     except Exception as e:
         await prog.edit(f"❌ Decryption error: {e}")
@@ -345,47 +302,41 @@ async def do_decrypt(bot: Client, m: Message):
         os.remove(path)
         if os.path.exists(out_fn): os.remove(out_fn)
 
-async def process_removeurl_file(bot: Client, m: Message):
+async def process_removeurl_file(bot, m: Message):
     doc = m.document
     if not doc.file_name.lower().endswith((".txt", ".py")):
         return await m.reply("❌ Only .txt/.py allowed.")
     if doc.file_size > MAX_SIZE:
-        return await m.reply("❌ File too large (max 10MB).")
-
+        return await m.reply("❌ File too large.")
     prog = await m.reply("⏳ Downloading…")
     path = await bot.download_media(m)
     await prog.edit("➖ Removing prefixes…")
-
     cleaned = []
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
-            line = line.rstrip("\n")
-            parts = line.split(":")
+            parts = line.rstrip("\n").split(":")
             if len(parts) >= 2:
                 cleaned.append(":".join(parts[-2:]))
-
     out_fn = f"removed_url_of_{doc.file_name}"
     with open(out_fn, "w", encoding="utf-8") as f:
         f.write("\n".join(cleaned))
-
     await bot.send_document(m.chat.id, out_fn, caption="✅ URLs stripped—user:pass only.")
     await prog.delete()
-    os.remove(path)
-    os.remove(out_fn)
+    os.remove(path); os.remove(out_fn)
 
 async def process_remove_dupe_file(bot: Client, m: Message):
     file = m.document
     if not file.file_name.lower().endswith(".txt"):
-        return await m.reply("❌ Only `.txt` files supported.")
+        return await m.reply("❌ Only `.txt` supported.")
     if file.file_size > MAX_SIZE:
-        return await m.reply("❌ File too large (max 10MB).")
+        return await m.reply("❌ File too large.")
 
     prog = await m.reply("⏳ Downloading…")
     path = await bot.download_media(m)
     await prog.edit("♻️ Removing duplicates…")
 
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        lines = [line.rstrip("\n") for line in f if line.strip()]
+        lines = [l.rstrip("\n") for l in f if l.strip()]
 
     seen = set()
     unique = []
@@ -394,7 +345,6 @@ async def process_remove_dupe_file(bot: Client, m: Message):
             seen.add(l)
             unique.append(l)
 
-    # if nothing changed
     if len(unique) == len(lines):
         await prog.edit("✅ No duplicates found.")
         os.remove(path)
@@ -404,66 +354,42 @@ async def process_remove_dupe_file(bot: Client, m: Message):
     with open(out_fn, "w", encoding="utf-8") as f:
         f.write("\n".join(unique))
 
-    await bot.send_document(
-      m.chat.id, out_fn,
-      caption="✅ Duplicates removed!"
-    )
+    await bot.send_document(m.chat.id, out_fn, caption="✅ Duplicates removed!")
     # cleanup
     await prog.delete()
     os.remove(path)
     os.remove(out_fn)
 
-    # Build output filename
-    out_fn = f"removed_url_of_{doc.file_name}"
-    with open(out_fn, "w", encoding="utf-8") as f:
-        f.write("\n".join(cleaned_lines))
-
-    # Send back
-    await bot.send_document(m.chat.id, out_fn,
-        caption="✅ Prefixes removed – only user:pass remain."
-    )
-
-    # cleanup
-    await prog.delete()
-    os.remove(path)
-    os.remove(out_fn)
-
-# in global scope:
 merge_sessions: dict[int, set[str]] = {}
 
-async def handle_merge_file(bot: Client, m: Message):
-    user_id = m.from_user.id
-    if user_state.get(user_id) != "merge":
-        return
-
+async def handle_merge_file(bot, m: Message):
+    uid = m.from_user.id
+    if user_state.get(uid) != "merge": return
     doc = m.document
     if not doc.file_name.lower().endswith(".txt"):
         return await m.reply("❌ Only `.txt` allowed.")
     if doc.file_size > MAX_SIZE:
-        return await m.reply("❌ File too large (max 10MB).")
-
+        return await m.reply("❌ File too large.")
     path = await bot.download_media(m)
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         lines = {ln.strip() for ln in f if ln.strip()}
     os.remove(path)
-
-    session = merge_sessions.setdefault(user_id, set())
+    session = merge_sessions.setdefault(uid, set())
     session.update(lines)
-
-    await m.reply(f"✅ Added! Total unique lines so far: {len(session)}.\n"
-                  "Send more `.txt` or type `/done` to finish.")
+    await m.reply(f"✅ Added! Total unique lines: {len(session)}.\nSend more or `/done`.")
 
 @app.on_message(filters.command("done") & filters.private)
-async def finish_merge(client: Client, m: Message):
-    user_id = m.from_user.id
-    session = merge_sessions.pop(user_id, None)
-    user_state.pop(user_id, None)
+@requires_premium
+async def finish_merge(_, m: Message):
+    uid     = m.from_user.id
+    session = merge_sessions.pop(uid, None)
+    user_state.pop(uid, None)
     if not session:
-        return await m.reply("⚠️ No merge in progress—use /menu → Merge first.")
+        return await m.reply("⚠️ No merge in progress—use `/menu` first.")
     out_fn = "merged_results.txt"
     with open(out_fn, "w", encoding="utf-8") as f:
         f.write("\n".join(session))
-    await client.send_document(m.chat.id, out_fn, caption="✅ Here’s your merged file!")
+    await _.send_document(m.chat.id, out_fn, caption="✅ Here’s your merged file!")
     os.remove(out_fn)
 
 # — Search submenus —
