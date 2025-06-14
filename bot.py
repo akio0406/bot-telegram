@@ -103,19 +103,23 @@ async def menu_cmd(_, m: Message):
         return await m.reply("⛔ Redeem a key first with `/redeem <key>`.")
     kb = InlineKeyboardMarkup([
         [
-          InlineKeyboardButton("🔐 Encrypt",       callback_data="menu_encrypt"),
-          InlineKeyboardButton("🔓 Decrypt",       callback_data="menu_decrypt")
+            InlineKeyboardButton("🔐 Encrypt",            callback_data="menu_encrypt"),
+            InlineKeyboardButton("🔓 Decrypt",            callback_data="menu_decrypt")
         ],
         [
-          InlineKeyboardButton("🔍 Search",        callback_data="menu_search"),
-          InlineKeyboardButton("➖ Remove URLs",    callback_data="menu_removeurl"),
-          InlineKeyboardButton("➗ Remove Duplicates", callback_data="menu_removedupe")
+            InlineKeyboardButton("🔍 Search",             callback_data="menu_search"),
+            InlineKeyboardButton("➖ Remove URLs",         callback_data="menu_removeurl"),
+            InlineKeyboardButton("➗ Remove Duplicates",   callback_data="menu_removedupe"),
+            InlineKeyboardButton("🔗 Merge Files",         callback_data="menu_merge")
         ],
         [
-          InlineKeyboardButton("👥 Refer",         callback_data="menu_refer")
+            InlineKeyboardButton("👥 Refer",              callback_data="menu_refer")
         ],
     ])
-    await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
+    await m.reply(
+        "♨️ XENO PREMIUM BOT ♨️\nChoose an action:",
+        reply_markup=kb
+    )
 
 # — Encrypt button —
 @app.on_callback_query(filters.regex("^menu_encrypt$"))
@@ -172,6 +176,21 @@ async def on_removeurl_cb(_, cq: CallbackQuery):
     user_state[uid] = "removeurl"
     await cq.message.reply("📂 Send a file containing URLs to remove.")
 
+# — Merge button —
+@app.on_callback_query(filters.regex("^menu_merge$") & restricted())
+async def on_merge_cb(_, cq: CallbackQuery):
+    uid = cq.from_user.id
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    if not await check_user_access(uid):
+        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
+
+    user_state[uid] = "merge"
+    await cq.message.reply(
+        "📂 Send multiple `.txt` files (max 10MB each). I’ll merge them without duplicates. "
+        "When you’re done, type `/done`."
+    )
+
 # — Remove Dupe —
 @app.on_callback_query(filters.regex("^menu_removedupe$"))
 async def on_removedupe_cb(_, cq: CallbackQuery):
@@ -204,21 +223,23 @@ async def remove_url_command(_, m: Message):
 # — Unified file handler —
 @app.on_message(filters.document & filters.private)
 async def file_handler(bot: Client, m: Message):
-    uid   = m.from_user.id
-    mode  = user_state.pop(uid, None)
+    uid  = m.from_user.id
+    mode = user_state.pop(uid, None)
     if not mode:
         return await m.reply(
-          "⚠️ First choose Encrypt, Decrypt, Search or Remove URLs via /menu."
+            "⚠️ First choose Encrypt, Decrypt, Search, Remove URLs, Remove Duplicates or Merge via /menu."
         )
+
     if mode == "encrypt":
         await do_encrypt(bot, m)
     elif mode == "decrypt":
         await do_decrypt(bot, m)
     elif mode == "removeurl":
         await process_removeurl_file(bot, m)
-    # <<< add this branch >>>
     elif mode == "removedupe":
         await process_remove_dupe_file(bot, m)
+    elif mode == "merge":
+        await handle_merge_file(bot, m)
 
 async def do_encrypt(bot: Client, m: Message):
     doc = m.document
@@ -349,6 +370,46 @@ async def process_remove_dupe_file(bot: Client, m: Message):
     os.remove(path)
     os.remove(out_fn)
 
+# in global scope:
+merge_sessions: dict[int, set[str]] = {}
+
+async def handle_merge_file(bot: Client, m: Message):
+    user_id = m.from_user.id
+    if user_state.get(user_id) != "merge":
+        return
+
+    doc = m.document
+    if not doc.file_name.lower().endswith(".txt"):
+        return await m.reply("❌ Only `.txt` allowed.")
+    if doc.file_size > MAX_SIZE:
+        return await m.reply("❌ File too large (max 10MB).")
+
+    path = await bot.download_media(m)
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        lines = {ln.strip() for ln in f if ln.strip()}
+    os.remove(path)
+
+    session = merge_sessions.setdefault(user_id, set())
+    session.update(lines)
+
+    await m.reply(f"✅ Added! Total unique lines so far: {len(session)}.\n"
+                  "Send more `.txt` or type `/done` to finish.")
+
+@app.on_message(filters.command("done") & filters.private)
+async def finish_merge(client: Client, m: Message):
+    user_id = m.from_user.id
+    session = merge_sessions.pop(user_id, None)
+    user_state.pop(user_id, None)
+
+    if not session:
+        return await m.reply("⚠️ No files merged. Use /menu → Merge first.")
+
+    out_fn = "merged_results.txt"
+    with open(out_fn, "w", encoding="utf-8") as f:
+        f.write("\n".join(session))
+
+    await client.send_document(m.chat.id, out_fn, caption="✅ Here’s your merged file!")
+    os.remove(out_fn)
 
 # — Search submenus —
 @app.on_callback_query(filters.regex("^expand_garena$"))
