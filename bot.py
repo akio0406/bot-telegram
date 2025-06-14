@@ -603,12 +603,17 @@ async def redeem_cmd(_, m: Message):
 # in‐memory admin flow state
 admin_state: dict[int, str] = {}
 
-# — /adminmenu: show buttons only —
+# — /adminmenu: add “Remove Expired Keys” alongside your existing buttons —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 Generate Key", callback_data="admin_genkey")],
-        [InlineKeyboardButton("❌ Remove Key",   callback_data="admin_removekey")],
+        [
+            InlineKeyboardButton("📤 Generate Key",     callback_data="admin_genkey"),
+            InlineKeyboardButton("❌ Remove Key",       callback_data="admin_removekey"),
+        ],
+        [
+            InlineKeyboardButton("⌛ Remove Expired",   callback_data="admin_remove_expired"),
+        ],
     ])
     await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
 
@@ -686,5 +691,35 @@ async def admin_flow_handler(_, m: Message):
     # clear the flow state in either case
     admin_state.pop(m.from_user.id, None)
 
+# — on “Remove Expired Keys” button press: run cleanup —
+@app.on_callback_query(filters.regex("^admin_remove_expired$") & filters.user(ADMIN_ID))
+async def admin_remove_expired_cb(_, cq: CallbackQuery):
+    await cq.answer()  # dismiss the loading spinner
+
+    try:
+        # fetch all unremoved keys
+        now_iso = datetime.now(timezone.utc).isoformat()
+        resp = supabase.table("xeno_keys") \
+            .select("key, expiry") \
+            .execute()
+
+        removed = 0
+        for row in resp.data or []:
+            # parse expiry
+            expiry = datetime.fromisoformat(row["expiry"].replace("Z", "+00:00"))
+            if expiry < datetime.now(timezone.utc):
+                # delete expired row
+                supabase.table("xeno_keys") \
+                    .delete() \
+                    .eq("key", row["key"]) \
+                    .execute()
+                removed += 1
+
+        await cq.message.reply(f"✅ Removed {removed} expired key(s).")
+
+    except Exception as e:
+        print(f"[ERROR] admin remove_expired: {e}")
+        await cq.message.reply(f"❌ Error removing expired keys: {e}")
+        
 if __name__ == "__main__":
     app.run()
