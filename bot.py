@@ -587,7 +587,21 @@ async def redeem_cmd(_, m: Message):
         print(f"[ERROR] redeem failed: {e}")
         await m.reply("❌ Something went wrong. Try again later.")
 
-# — Admin: /genkey & /generate —
+# — Admin Menu —
+@app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
+async def adminmenu_cmd(_, m: Message):
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 Generate Key", switch_inline_query_current_chat="/genkey ")],
+        [InlineKeyboardButton("🔓 Redeem Key",   switch_inline_query_current_chat="/redeem ")],
+    ])
+    await m.reply(
+        "🛠 Admin Menu – choose an action:\n\n"
+        "• Tap “Generate Key” → enter duration (e.g. `1d`)\n"
+        "• Tap “Redeem Key”   → enter the key",
+        reply_markup=kb
+    )
+
+# — Admin-only /genkey & /generate —
 @app.on_message(filters.command(["genkey","generate"]) & filters.private & filters.user(ADMIN_ID))
 async def genkey_cmd(_, m: Message):
     parts = m.text.strip().split()
@@ -595,8 +609,9 @@ async def genkey_cmd(_, m: Message):
         return await m.reply("❌ Usage: `/genkey <duration>`", quote=True)
     delta = parse_duration(parts[1])
     if delta.total_seconds() <= 0:
-        return await m.reply("❌ Invalid duration. Use `1d`, `12h`, or `30m`.", quote=True)
-    key    = "XENO-" + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
+        return await m.reply("❌ Invalid duration. Use `1d`,`12h`,`30m`.", quote=True)
+    key    = "XENO-" + "".join(random.choices(
+                 "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
     now    = datetime.now(timezone.utc)
     expiry = now + delta
     try:
@@ -609,12 +624,16 @@ async def genkey_cmd(_, m: Message):
             "duration": parts[1],
             "banned": False
         }).execute()
-        await m.reply(f"✅ Key: `{key}`\nExpires: `{expiry}`\nRedeem with `/redeem {key}`")
+        await m.reply(
+            f"✅ Key: `{key}`\nExpires: `{expiry}`\n"
+            f"Redeem with `/redeem {key}`",
+            quote=True
+        )
     except Exception as e:
         print(f"[ERROR] key insert: {e}")
         await m.reply("❌ Failed to generate key. Try again later.")
 
-# — /redeem —
+# — /redeem (any user) —
 @app.on_message(filters.command("redeem") & filters.private)
 async def redeem_cmd(_, m: Message):
     parts = m.text.strip().split()
@@ -625,20 +644,21 @@ async def redeem_cmd(_, m: Message):
     try:
         resp = supabase.table("xeno_keys").select("*").eq("key", key).execute()
         if not resp.data:
-            return await m.reply("❌ Invalid key.")
+            return await m.reply("❌ Invalid key.", quote=True)
         row = resp.data[0]
         if row.get("redeemed_by"):
-            return await m.reply("❌ Already redeemed.")
+            return await m.reply("❌ Already redeemed.", quote=True)
         exp = datetime.fromisoformat(row["expiry"].replace("Z","+00:00"))
         if exp < now:
-            return await m.reply("❌ Key expired.")
+            return await m.reply("❌ Key expired.", quote=True)
         supabase.table("xeno_keys") \
             .update({"redeemed_by": m.from_user.id}) \
             .eq("key", key).execute()
-        await m.reply(f"✅ Redeemed! Valid until {exp}\nUse /menu now.")
+        await m.reply(f"✅ Redeemed! Valid until {exp}\nUse /menu now.", quote=True)
     except Exception as e:
         print(f"[ERROR] redeem failed: {e}")
-        await m.reply("❌ Something went wrong. Try again later.")
+        await m.reply("❌ Something went wrong. Try again later.", quote=True)
+
 
 if __name__ == "__main__":
     app.run()
