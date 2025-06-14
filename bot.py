@@ -103,17 +103,17 @@ async def menu_cmd(_, m: Message):
         return await m.reply("⛔ Redeem a key first with `/redeem <key>`.")
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔐 Encrypt",            callback_data="menu_encrypt"),
-            InlineKeyboardButton("🔓 Decrypt",            callback_data="menu_decrypt")
+            InlineKeyboardButton("🔐 Encrypt",          callback_data="menu_encrypt"),
+            InlineKeyboardButton("🔓 Decrypt",          callback_data="menu_decrypt"),
         ],
         [
-            InlineKeyboardButton("🔍 Search",             callback_data="menu_search"),
-            InlineKeyboardButton("➖ Remove URLs",         callback_data="menu_removeurl"),
-            InlineKeyboardButton("➗ Remove Duplicates",   callback_data="menu_removedupe"),
-            InlineKeyboardButton("🔗 Merge Files",         callback_data="menu_merge")
+            InlineKeyboardButton("🔍 Search",           callback_data="menu_search"),
+            InlineKeyboardButton("➖ Remove URLs",       callback_data="menu_removeurl"),
+            InlineKeyboardButton("➗ Remove Duplicates", callback_data="menu_removedupe"),
+            InlineKeyboardButton("🔗 Merge Files",       callback_data="menu_merge"),
         ],
         [
-            InlineKeyboardButton("👥 Refer",              callback_data="menu_refer")
+            InlineKeyboardButton("🆔 My Info",          callback_data="menu_myinfo"),
         ],
     ])
     await m.reply(
@@ -204,6 +204,49 @@ async def on_removedupe_cb(_, cq: CallbackQuery):
       "📂 Send a `.txt` file (max 10MB) — I’ll strip out all duplicate lines for you!"
     )
 
+@app.on_callback_query(filters.regex("^menu_myinfo$"))
+async def on_myinfo_cb(_, cq: CallbackQuery):
+    uid = cq.from_user.id
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+
+    # fetch the user’s redeemed key
+    resp = supabase.table("xeno_keys") \
+        .select("key, expiry") \
+        .eq("redeemed_by", uid) \
+        .eq("banned", False) \
+        .limit(1) \
+        .execute()
+
+    rows = resp.data or []
+    if not rows:
+        return await cq.message.reply("❌ You haven’t redeemed a key yet.")
+
+    info   = rows[0]
+    key     = info["key"]
+    expiry  = datetime.fromisoformat(info["expiry"].replace("Z","+00:00"))
+    now     = datetime.now(timezone.utc)
+    remaining = expiry - now
+
+    # format remaining time
+    total = int(remaining.total_seconds())
+    days, rem    = divmod(total, 86400)
+    hours, rem   = divmod(rem, 3600)
+    minutes, _   = divmod(rem, 60)
+    if days:
+        dur = f"{days}d {hours}h {minutes}m"
+    elif hours:
+        dur = f"{hours}h {minutes}m"
+    else:
+        dur = f"{minutes}m"
+
+    await cq.message.reply(
+        f"🆔 Your Key: `{key}`\n"
+        f"📅 Expires on: `{expiry}`\n"
+        f"⏳ Time left: `{dur}`",
+        parse_mode="Markdown"
+    )
+
 # — Fallback commands —
 @app.on_message(filters.command("encrypt") & filters.private)
 async def cmd_encrypt(_, m: Message):
@@ -221,7 +264,7 @@ async def remove_url_command(_, m: Message):
     await m.reply("📂 Send a file containing URLs to remove.")
 
 # — Unified file handler —
-@app.on_message(filters.document & filters.private & ~filters.forwarded)
+@app.on_message(filters.document & filters.private)
 async def file_handler(bot: Client, m: Message):
     uid  = m.from_user.id
     mode = user_state.get(uid)                       # ← use get()
