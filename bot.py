@@ -600,10 +600,10 @@ async def redeem_cmd(_, m: Message):
         await m.reply("❌ Something went wrong. Try again later.", quote=True)
 
 
-# in‐memory admin flow state
+# in-memory admin state
 admin_state: dict[int, str] = {}
 
-# — /adminmenu: show admin actions —
+# — /adminmenu: show all admin buttons —
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
     kb = InlineKeyboardMarkup([
@@ -615,18 +615,25 @@ async def adminmenu_cmd(_, m: Message):
             InlineKeyboardButton("⌛ Remove Expired",   callback_data="admin_remove_expired"),
             InlineKeyboardButton("🗓 Extend Key",       callback_data="admin_extend_key"),
         ],
+        [
+            InlineKeyboardButton("⛔ Ban User",         callback_data="admin_ban_user"),
+            InlineKeyboardButton("✔️ Unban User",       callback_data="admin_unban_user"),
+            InlineKeyboardButton("📋 Show Banlist",     callback_data="admin_show_banlist"),
+        ],
     ])
     await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
 
-# — on “Generate Key” button press: ask for duration —
+
+# — callback: Generate Key —
 @app.on_callback_query(filters.regex("^admin_genkey$") & filters.user(ADMIN_ID))
 async def admin_genkey_cb(_, cq: CallbackQuery):
     await cq.answer()
     await cq.message.edit_reply_markup(None)
     admin_state[cq.from_user.id] = "await_duration"
-    await cq.message.reply("🛠 Enter duration for the new key (e.g. 1d, 12h, 30m):")
+    await cq.message.reply("🛠 Enter duration (e.g. 1d, 12h, 30m):")
 
-# — on “Remove Key” button press: ask for key string —
+
+# — callback: Remove Key —
 @app.on_callback_query(filters.regex("^admin_removekey$") & filters.user(ADMIN_ID))
 async def admin_removekey_cb(_, cq: CallbackQuery):
     await cq.answer()
@@ -634,12 +641,12 @@ async def admin_removekey_cb(_, cq: CallbackQuery):
     admin_state[cq.from_user.id] = "await_remove_key"
     await cq.message.reply("🛠 Send the exact key to remove (e.g. XENO-ABCDEFG1234):")
 
-# — on “Remove Expired” button press: sweep old keys immediately —
+
+# — callback: Remove Expired —
 @app.on_callback_query(filters.regex("^admin_remove_expired$") & filters.user(ADMIN_ID))
 async def admin_remove_expired_cb(_, cq: CallbackQuery):
     await cq.answer()
     await cq.message.edit_reply_markup(None)
-
     now = datetime.now(timezone.utc)
     removed = 0
     resp = supabase.table("xeno_keys").select("key, expiry").execute()
@@ -648,10 +655,10 @@ async def admin_remove_expired_cb(_, cq: CallbackQuery):
         if exp < now:
             supabase.table("xeno_keys").delete().eq("key", row["key"]).execute()
             removed += 1
-
     await cq.message.reply(f"✅ Removed {removed} expired key(s).")
 
-# — on “Extend Key” button press: ask for key & duration —
+
+# — callback: Extend Key —
 @app.on_callback_query(filters.regex("^admin_extend_key$") & filters.user(ADMIN_ID))
 async def admin_extend_key_cb(_, cq: CallbackQuery):
     await cq.answer()
@@ -662,12 +669,45 @@ async def admin_extend_key_cb(_, cq: CallbackQuery):
         "Example: XENO-ABCDEFG1234 1d"
     )
 
-# — catch the next text from admin for all multi‐step flows —
+
+# — callback: Ban User —
+@app.on_callback_query(filters.regex("^admin_ban_user$") & filters.user(ADMIN_ID))
+async def admin_ban_user_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    admin_state[cq.from_user.id] = "await_ban_user"
+    await cq.message.reply("⛔ Send the user_id to ban:")
+
+
+# — callback: Unban User —
+@app.on_callback_query(filters.regex("^admin_unban_user$") & filters.user(ADMIN_ID))
+async def admin_unban_user_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    admin_state[cq.from_user.id] = "await_unban_user"
+    await cq.message.reply("✔️ Send the user_id to unban:")
+
+
+# — callback: Show Banlist —
+@app.on_callback_query(filters.regex("^admin_show_banlist$") & filters.user(ADMIN_ID))
+async def admin_show_banlist_cb(_, cq: CallbackQuery):
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    banned = load_banned()           # your existing loader
+    if not banned:
+        text = "✅ No users are currently banned."
+    else:
+        lines = "\n".join(f"- {uid}" for uid in banned)
+        text  = "🚫 Banned users:\n" + lines
+    await cq.message.reply(text)
+
+
+# — single text-handler for all “ask next” flows —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
 async def admin_flow_handler(_, m: Message):
     flow = admin_state.get(m.from_user.id)
 
-    # 1) Generate Key flow
+    # 1) Generate Key
     if flow == "await_duration":
         code  = m.text.strip()
         delta = parse_duration(code)
@@ -678,7 +718,6 @@ async def admin_flow_handler(_, m: Message):
                      "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=10))
         now    = datetime.now(timezone.utc)
         expiry = now + delta
-
         try:
             supabase.table("xeno_keys").insert({
                 "key":         key,
@@ -692,14 +731,14 @@ async def admin_flow_handler(_, m: Message):
             await m.reply(
                 f"✅ Generated Key: {key}\n"
                 f"Expires at: {expiry}\n"
-                f"Users redeem with: /redeem {key}",
+                f"Redeem with: /redeem {key}",
                 quote=True
             )
         except Exception as e:
             print(f"[ERROR] admin genkey: {e}")
-            await m.reply("❌ Failed to create key. Try again later.", quote=True)
+            await m.reply("❌ Failed to create key.", quote=True)
 
-    # 2) Remove specific Key flow
+    # 2) Remove Key
     elif flow == "await_remove_key":
         key = m.text.strip().upper()
         resp = supabase.table("xeno_keys").select("key").eq("key", key).execute()
@@ -711,48 +750,71 @@ async def admin_flow_handler(_, m: Message):
                 await m.reply(f"✅ Key {key} removed.", quote=True)
             except Exception as e:
                 print(f"[ERROR] admin removekey: {e}")
-                await m.reply("❌ Failed to remove key. Try again later.", quote=True)
+                await m.reply("❌ Failed to remove key.", quote=True)
 
-    # 3) Extend Key flow
+    # 3) Extend Key
     elif flow == "await_extend_key":
         parts = m.text.strip().split(maxsplit=1)
         if len(parts) != 2:
             return await m.reply(
-                "❌ Usage: KEY DURATION\n"
-                "Example: XENO-ABCDEFG1234 1d",
-                quote=True
+                "❌ Usage: KEY DURATION\nExample: XENO-ABC123 1d", quote=True
             )
-
         key_str, dur = parts[0].upper(), parts[1]
         delta = parse_duration(dur)
         if delta.total_seconds() <= 0:
             return await m.reply("❌ Invalid duration. Enter 1d, 12h, or 30m.", quote=True)
 
-        # fetch existing record
         resp = supabase.table("xeno_keys").select("expiry").eq("key", key_str).execute()
         if not resp.data:
             return await m.reply("❌ Key not found.", quote=True)
 
         old_exp = datetime.fromisoformat(resp.data[0]["expiry"].replace("Z", "+00:00"))
         new_exp = old_exp + delta
-
         try:
             supabase.table("xeno_keys") \
                 .update({"expiry": new_exp.isoformat()}) \
                 .eq("key", key_str).execute()
             await m.reply(
                 f"✅ Extended {key_str} by {dur}\n"
-                f"Old expiry: {old_exp}\n"
-                f"New expiry: {new_exp}",
+                f"Old expiry: {old_exp}\nNew expiry: {new_exp}",
                 quote=True
             )
         except Exception as e:
             print(f"[ERROR] admin extendkey: {e}")
-            await m.reply("❌ Failed to extend key. Try again later.", quote=True)
+            await m.reply("❌ Failed to extend key.", quote=True)
 
-    # clear the flow state for any branch
+    # 4) Ban User
+    elif flow == "await_ban_user":
+        try:
+            uid = int(m.text.strip())
+        except:
+            return await m.reply("❌ Invalid user_id.", quote=True)
+
+        banned = load_banned()
+        if uid in banned:
+            await m.reply("⚠️ User already banned.", quote=True)
+        else:
+            banned.append(uid)
+            save_banned(banned)
+            await m.reply(f"✅ User {uid} banned.", quote=True)
+
+    # 5) Unban User
+    elif flow == "await_unban_user":
+        try:
+            uid = int(m.text.strip())
+        except:
+            return await m.reply("❌ Invalid user_id.", quote=True)
+
+        banned = load_banned()
+        if uid not in banned:
+            await m.reply("⚠️ User not banned.", quote=True)
+        else:
+            banned.remove(uid)
+            save_banned(banned)
+            await m.reply(f"✅ User {uid} unbanned.", quote=True)
+
+    # clear state in all cases
     admin_state.pop(m.from_user.id, None)
-
         
 if __name__ == "__main__":
     app.run()
