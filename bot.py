@@ -103,15 +103,16 @@ async def menu_cmd(_, m: Message):
         return await m.reply("⛔ Redeem a key first with `/redeem <key>`.")
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔐 Encrypt",    callback_data="menu_encrypt"),
-            InlineKeyboardButton("🔓 Decrypt",    callback_data="menu_decrypt")
+          InlineKeyboardButton("🔐 Encrypt",       callback_data="menu_encrypt"),
+          InlineKeyboardButton("🔓 Decrypt",       callback_data="menu_decrypt")
         ],
         [
-            InlineKeyboardButton("🔍 Search",     callback_data="menu_search"),
-            InlineKeyboardButton("➖ Remove URLs", callback_data="menu_removeurl")
+          InlineKeyboardButton("🔍 Search",        callback_data="menu_search"),
+          InlineKeyboardButton("➖ Remove URLs",    callback_data="menu_removeurl"),
+          InlineKeyboardButton("➗ Remove Duplicates", callback_data="menu_removedupe")
         ],
         [
-            InlineKeyboardButton("👥 Refer",      callback_data="menu_refer")
+          InlineKeyboardButton("👥 Refer",         callback_data="menu_refer")
         ],
     ])
     await m.reply("♨️ XENO PREMIUM BOT ♨️\nChoose an action:", reply_markup=kb)
@@ -171,6 +172,19 @@ async def on_removeurl_cb(_, cq: CallbackQuery):
     user_state[uid] = "removeurl"
     await cq.message.reply("📂 Send a file containing URLs to remove.")
 
+# — Remove Dupe —
+@app.on_callback_query(filters.regex("^menu_removedupe$"))
+async def on_removedupe_cb(_, cq: CallbackQuery):
+    uid = cq.from_user.id
+    await cq.answer()
+    await cq.message.edit_reply_markup(None)
+    if not await check_user_access(uid):
+        return await cq.message.reply("⛔ Redeem a key first (`/redeem <key>`).")
+    user_state[uid] = "removedupe"
+    await cq.message.reply(
+      "📂 Send a `.txt` file (max 10MB) — I’ll strip out all duplicate lines for you!"
+    )
+
 # — Fallback commands —
 @app.on_message(filters.command("encrypt") & filters.private)
 async def cmd_encrypt(_, m: Message):
@@ -194,7 +208,7 @@ async def file_handler(bot: Client, m: Message):
     mode  = user_state.pop(uid, None)
     if not mode:
         return await m.reply(
-            "⚠️ First choose Encrypt, Decrypt, Search or Remove URLs via /menu."
+          "⚠️ First choose Encrypt, Decrypt, Search or Remove URLs via /menu."
         )
     if mode == "encrypt":
         await do_encrypt(bot, m)
@@ -202,6 +216,9 @@ async def file_handler(bot: Client, m: Message):
         await do_decrypt(bot, m)
     elif mode == "removeurl":
         await process_removeurl_file(bot, m)
+    # <<< add this branch >>>
+    elif mode == "removedupe":
+        await process_remove_dupe_file(bot, m)
 
 async def do_encrypt(bot: Client, m: Message):
     doc = m.document
@@ -276,6 +293,46 @@ async def process_removeurl_file(bot: Client, m: Message):
             if len(parts) >= 2:
                 cleaned = ":".join(parts[-2:])
                 cleaned_lines.append(cleaned)
+
+async def process_remove_dupe_file(bot: Client, m: Message):
+    file = m.document
+    if not file.file_name.lower().endswith(".txt"):
+        return await m.reply("❌ Only `.txt` files supported.")
+    if file.file_size > MAX_SIZE:
+        return await m.reply("❌ File too large (max 10MB).")
+
+    prog = await m.reply("⏳ Downloading…")
+    path = await bot.download_media(m)
+    await prog.edit("♻️ Removing duplicates…")
+
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        lines = [line.rstrip("\n") for line in f if line.strip()]
+
+    seen = set()
+    unique = []
+    for l in lines:
+        if l not in seen:
+            seen.add(l)
+            unique.append(l)
+
+    # if nothing changed
+    if len(unique) == len(lines):
+        await prog.edit("✅ No duplicates found.")
+        os.remove(path)
+        return
+
+    out_fn = f"no_dupes_{file.file_name}"
+    with open(out_fn, "w", encoding="utf-8") as f:
+        f.write("\n".join(unique))
+
+    await bot.send_document(
+      m.chat.id, out_fn,
+      caption="✅ Duplicates removed!"
+    )
+    # cleanup
+    await prog.delete()
+    os.remove(path)
+    os.remove(out_fn)
 
     # Build output filename
     out_fn = f"removed_url_of_{doc.file_name}"
