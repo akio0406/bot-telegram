@@ -210,7 +210,6 @@ async def on_myinfo_cb(_, cq: CallbackQuery):
     await cq.answer()
     await cq.message.edit_reply_markup(None)
 
-    # fetch the user’s redeemed key
     resp = supabase.table("xeno_keys") \
         .select("key, expiry") \
         .eq("redeemed_by", uid) \
@@ -226,11 +225,9 @@ async def on_myinfo_cb(_, cq: CallbackQuery):
     key     = info["key"]
     expiry  = datetime.fromisoformat(info["expiry"].replace("Z","+00:00"))
     now     = datetime.now(timezone.utc)
-    remaining = expiry - now
+    rem     = int((expiry - now).total_seconds())
 
-    # format remaining time
-    total = int(remaining.total_seconds())
-    days, rem    = divmod(total, 86400)
+    days, rem    = divmod(rem, 86400)
     hours, rem   = divmod(rem, 3600)
     minutes, _   = divmod(rem, 60)
     if days:
@@ -240,11 +237,11 @@ async def on_myinfo_cb(_, cq: CallbackQuery):
     else:
         dur = f"{minutes}m"
 
+    # pure text, no parse_mode
     await cq.message.reply(
-        f"🆔 Your Key: `{key}`\n"
-        f"📅 Expires on: `{expiry}`\n"
-        f"⏳ Time left: `{dur}`",
-        parse_mode="Markdown"
+        "🆔 Your Key: "   + key   + "\n"
+        "📅 Expires on: "  + str(expiry)  + "\n"
+        "⏳ Time left: "   + dur
     )
 
 # — Fallback commands —
