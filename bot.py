@@ -182,7 +182,7 @@ async def cmd_decrypt(_, m: Message):
     user_state[m.from_user.id] = "decrypt"
     await m.reply("📂 Send an encrypted `.py` or `.txt` file to decrypt.")
 
-@app.on_message(filters.command("removeurl") & filters.private & restricted())
+@app.on_message(filters.command("removeurl") & filters.private)
 async def remove_url_command(_, m: Message):
     user_state[m.from_user.id] = "removeurl"
     await m.reply("📂 Send a file containing URLs to remove.")
