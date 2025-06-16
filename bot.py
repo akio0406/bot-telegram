@@ -768,29 +768,34 @@ async def admin_check_lines_cb(_, cq: CallbackQuery):
             )
             counts[kw] = res.count or 0
 
-        # 2) build a two-column box
+        # 2) prepare headers & rows
         headers = ["Keyword", "Lines"]
         rows = [[kw, str(counts[kw])] for kw in KEYWORDS]
 
-        # compute column widths
-        cols = [headers] + rows
-        w0 = max(len(r[0]) for r in cols)
-        w1 = max(len(r[1]) for r in cols)
+        # 3) compute column widths
+        all_rows = [headers] + rows
+        w0 = max(len(r[0]) for r in all_rows)
+        w1 = max(len(r[1]) for r in all_rows)
 
-        top = f"╔{'═'*(w0+2)}╤{'═'*(w1+2)}╗"
-        hdr = f"║ {headers[0].ljust(w0)} │ {headers[1].rjust(w1)} ║"
-        sep = f"╠{'═'*(w0+2)}╪{'═'*(w1+2)}╣"
-        body = "\n".join(
-            f"║ {kw.ljust(w0)} │ {lines.rjust(w1)} ║"
-            for kw, lines in rows
+        # 4) build box parts
+        top = f"╔{'═'*(w0+2)}╦{'═'*(w1+2)}╗"
+        hdr = (
+            f"║ {headers[0].center(w0)}"
+            f" │ {headers[1].center(w1)} ║"
         )
-        bot = f"╚{'═'*(w0+2)}╧{'═'*(w1+2)}╝"
+        sep = f"╠{'═'*(w0+2)}╬{'═'*(w1+2)}╣"
+        body = "\n".join(
+            f"║ {kw.ljust(w0)} │ {cnt.rjust(w1)} ║"
+            for kw, cnt in rows
+        )
+        bot = f"╚{'═'*(w0+2)}╩{'═'*(w1+2)}╝"
 
         table = "\n".join([top, hdr, sep, body, bot])
         await cq.message.reply(f"🔍 TOTAL LINES STATUS:\n{table}")
 
     except Exception as e:
         await cq.message.reply(f"❌ Error checking lines:\n{e}")
+
         
 # — single text-handler for all multi-step flows —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
