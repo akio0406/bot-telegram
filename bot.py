@@ -512,22 +512,30 @@ async def perform_search(_, cq: CallbackQuery):
 
 @app.on_callback_query(filters.regex("^copy_code_"))
 async def copy_results_text(_, cq: CallbackQuery):
-    _, _, filename, keyword = cq.data.split("_",3)
+    # strip off the "copy_code_" prefix, then split once at the final "_"
+    payload = cq.data[len("copy_code_"):]
+    filename, keyword = payload.rsplit("_", 1)
+
     path = f"Generated/{filename}"
     if os.path.exists(path):
-        content = open(path,"r",encoding="utf-8").read()
-        if len(content)>4096:
-            content = content[:4090]+"...\n[Truncated]"
+        content = open(path, "r", encoding="utf-8").read()
+        if len(content) > 4096:
+            content = content[:4090] + "...\n[Truncated]"
         await cq.message.reply(
             f"<b>Results for:</b> <code>{keyword}</code>\n<pre>{content}</pre>",
             parse_mode="HTML"
         )
         os.remove(path)
+
+    # remove the inline‐keyboard
     await cq.message.delete()
 
 @app.on_callback_query(filters.regex("^download_results_"))
 async def download_results_file(_, cq: CallbackQuery):
-    _, _, filename, keyword = cq.data.split("_",3)
+    # strip off the "download_results_" prefix, then split once at the final "_"
+    payload = cq.data[len("download_results_"):]
+    filename, keyword = payload.rsplit("_", 1)
+
     path = f"Generated/{filename}"
     if os.path.exists(path):
         await cq.message.reply_document(
@@ -535,6 +543,8 @@ async def download_results_file(_, cq: CallbackQuery):
             caption=f"📄 PREMIUM results for `{keyword}`"
         )
         os.remove(path)
+
+    # remove the inline‐keyboard
     await cq.message.delete()
 
 # — /redeem (enforce one-key-per-user) —
