@@ -627,23 +627,38 @@ async def start_flow(cq: CallbackQuery, flow: str, prompt: str):
     admin_state[cq.from_user.id] = flow
     await cq.message.reply(prompt)
 
-# — /adminmenu: show all admin buttons —
+# ─── at top ───
+KEYWORDS = [
+    "100082", "100055", "gaslite", "garena",
+    "authgop", "roblox", "codashop", "mtacc",
+    "facebook.com","instagram.com","whatsapp.com",
+    "twitter.com","discord.com",
+    "google.com","yahoo.com","outlook.com",
+    "riotgames.com","battle.net","minecraft.net",
+    "supercell.com","wargaming.net"
+]
+
+# ─── extend your admin menu ───
 @app.on_message(filters.command("adminmenu") & filters.private & filters.user(ADMIN_ID))
 async def adminmenu_cmd(_, m: Message):
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📤 Generate Key",     callback_data="admin_genkey"),
-            InlineKeyboardButton("❌ Remove Key",       callback_data="admin_removekey"),
+            InlineKeyboardButton("📤 Generate Key",   callback_data="admin_genkey"),
+            InlineKeyboardButton("❌ Remove Key",     callback_data="admin_removekey"),
         ],
         [
-            InlineKeyboardButton("⌛ Remove Expired",   callback_data="admin_remove_expired"),
-            InlineKeyboardButton("🗓 Extend Key",       callback_data="admin_extend_key"),
+            InlineKeyboardButton("⌛ Remove Expired", callback_data="admin_remove_expired"),
+            InlineKeyboardButton("🗓 Extend Key",     callback_data="admin_extend_key"),
         ],
         [
-            InlineKeyboardButton("⛔ Ban User",         callback_data="admin_ban_user"),
-            InlineKeyboardButton("✔️ Unban User",       callback_data="admin_unban_user"),
-            InlineKeyboardButton("📋 Show Banlist",     callback_data="admin_show_banlist"),
-            InlineKeyboardButton("📈 Show Stats",       callback_data="admin_show_stats"),
+            InlineKeyboardButton("⛔ Ban User",       callback_data="admin_ban_user"),
+            InlineKeyboardButton("✔️ Unban User",     callback_data="admin_unban_user"),
+            InlineKeyboardButton("📋 Show Banlist",   callback_data="admin_show_banlist"),
+            InlineKeyboardButton("📈 Show Stats",     callback_data="admin_show_stats"),
+        ],
+        # ← NEW LINE
+        [
+            InlineKeyboardButton("🔎 Check total lines", callback_data="admin_check_lines"),
         ],
     ])
     await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
@@ -736,7 +751,47 @@ async def admin_show_banlist_cb(_, cq: CallbackQuery):
         lines = "\n".join(f"- `{uid}`" for uid in users)
         await cq.message.reply(f"🚫 Banned users:\n{lines}")
 
+# ─── handler for “Check total lines” ───
+@app.on_callback_query(filters.regex("^admin_check_lines$") & filters.user(ADMIN_ID))
+async def admin_check_lines_cb(_, cq: CallbackQuery):
+    await cq.answer()  # remove spinner
+    try:
+        # 1) gather counts
+        counts = {}
+        for kw in KEYWORDS:
+            res = (
+                supabase
+                .table("entries")
+                .select("id", count="exact")
+                .ilike("line", f"%{kw}%")
+                .execute()
+            )
+            counts[kw] = res.count or 0
 
+        # 2) build a two-column box
+        headers = ["Keyword", "Lines"]
+        rows = [[kw, str(counts[kw])] for kw in KEYWORDS]
+
+        # compute column widths
+        cols = [headers] + rows
+        w0 = max(len(r[0]) for r in cols)
+        w1 = max(len(r[1]) for r in cols)
+
+        top = f"╔{'═'*(w0+2)}╤{'═'*(w1+2)}╗"
+        hdr = f"║ {headers[0].ljust(w0)} │ {headers[1].rjust(w1)} ║"
+        sep = f"╠{'═'*(w0+2)}╪{'═'*(w1+2)}╣"
+        body = "\n".join(
+            f"║ {kw.ljust(w0)} │ {lines.rjust(w1)} ║"
+            for kw, lines in rows
+        )
+        bot = f"╚{'═'*(w0+2)}╧{'═'*(w1+2)}╝"
+
+        table = "\n".join([top, hdr, sep, body, bot])
+        await cq.message.reply(f"🔍 TOTAL LINES STATUS:\n{table}")
+
+    except Exception as e:
+        await cq.message.reply(f"❌ Error checking lines:\n{e}")
+        
 # — single text-handler for all multi-step flows —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
 async def admin_flow_handler(_, m: Message):
