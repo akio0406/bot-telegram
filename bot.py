@@ -404,6 +404,8 @@ async def finish_merge(_, m: Message):
     await _.send_document(m.chat.id, out_fn, caption="✅ Here’s your merged file!")
     os.remove(out_fn)
 
+from pyrogram.errors import MessageNotModified
+
 # — Search submenus —
 @app.on_callback_query(filters.regex("^expand_garena$"))
 async def expand_garena(_, cq: CallbackQuery):
@@ -415,7 +417,14 @@ async def expand_garena(_, cq: CallbackQuery):
         [InlineKeyboardButton("🔐 Gaslite",          callback_data="keyword_gaslite")],
         [InlineKeyboardButton("🔙 Back",             callback_data="back_to_main")],
     ])
-    await cq.message.edit_text("🛡 GARENA SUB-KEYWORDS:", reply_markup=kb)
+    try:
+        await cq.message.edit_text(
+            "🛡 GARENA SUB-KEYWORDS:",
+            reply_markup=kb
+        )
+    except MessageNotModified:
+        # text didn't change, just swap the keyboard
+        await cq.message.edit_reply_markup(kb)
 
 @app.on_callback_query(filters.regex("^expand_socmeds$"))
 async def expand_socmeds(_, cq: CallbackQuery):
