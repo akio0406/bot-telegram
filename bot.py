@@ -584,20 +584,44 @@ async def copy_results_text(_, cq: CallbackQuery):
 
 @app.on_callback_query(filters.regex("^download_results_"))
 async def download_results_file(_, cq: CallbackQuery):
-    # strip off the "download_results_" prefix, then split once at the final "_"
+    # 0) ACK the button so the spinner goes away
+    await cq.answer()
+
+    # 1) parse out the file name + keyword
     payload = cq.data[len("download_results_"):]
     filename, keyword = payload.rsplit("_", 1)
+    path = os.path.join("Generated", filename)
 
-    path = f"Generated/{filename}"
-    if os.path.exists(path):
-        await cq.message.reply_document(
-            document=path,
-            caption=f"📄 PREMIUM results for `{keyword}`"
+    # 2) guard against “I can’t find the file”
+    if not os.path.isfile(path):
+        return await cq.message.edit_text(
+            "❌ Sorry, the result file has already expired or was deleted."
         )
-        os.remove(path)
 
-    # remove the inline‐keyboard
+    # 3) send the document
+    try:
+        # use chat.send_document instead of reply_document
+        await cq.message.chat.send_document(
+            path,
+            caption=f"📄 PREMIUM results for `{keyword}`",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        # log and notify
+        print("❌ Failed to send document", e)
+        return await cq.message.edit_text(
+            "❌ Failed to deliver the file. Please try again."
+        )
+    finally:
+        # 4) cleanup
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    # 5) remove the old preview+buttons
     await cq.message.delete()
+
 
 # — /redeem (enforce one-key-per-user) —
 @app.on_message(filters.command("redeem") & filters.private)
