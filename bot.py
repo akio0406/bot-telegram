@@ -617,31 +617,40 @@ async def copy_results_text(_, cq: CallbackQuery):
 
 @app.on_callback_query(filters.regex("^download_results_"))
 async def download_results_file(_, cq: CallbackQuery):
-    await cq.answer()  # clear spinner
+    await cq.answer()  # clear the spinner
 
-    payload = cq.data[len("download_results_"):]
+    # parse filename + keyword
+    payload  = cq.data[len("download_results_"):]
     filename, keyword = payload.rsplit("_", 1)
-    path = os.path.join("Generated", filename)
+    path     = os.path.join("Generated", filename)
 
+    # guard: file must exist
     if not os.path.isfile(path):
-        return await cq.message.reply("❌ Result file not found.")
+        return await cq.message.edit_text("❌ Result file not found.")
 
+    # try sending
     try:
-        await cq.client.send_document(
-            chat_id=cq.message.chat.id,
+        await cq.message.reply_document(
             document=path,
-            caption=f"📄 PREMIUM results for `{keyword}`",
-            parse_mode="Markdown"
+            caption=f"📄 PREMIUM results for `{keyword}`"
         )
-    except Exception:
-        return await cq.message.reply("❌ Could not send the file.")
+    except Exception as e:
+        # log the real error
+        print("❌ send_document failed:", repr(e))
+        return await cq.message.edit_text("❌ Could not send the file.")
     finally:
-        os.remove(path)
+        # cleanup in any case
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
+    # remove the old preview + buttons
     try:
         await cq.message.delete()
     except:
         pass
+
 
 # — /redeem (enforce one-key-per-user) —
 @app.on_message(filters.command("redeem") & filters.private)
