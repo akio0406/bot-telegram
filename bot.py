@@ -504,97 +504,60 @@ from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBu
 
 @app.on_callback_query(filters.regex("^format_"))
 async def perform_search(_, cq: CallbackQuery):
-    # unpack callback payload
     _, keyword, fmt = cq.data.split("_", 2)
-    include_urls = (fmt == "full")
     await cq.answer("⏳ Searching…")
 
-    # 1) fetch id+line for all matches
-    resp = (
-        supabase
-        .from_("xeno")
-        .select("id,line")
-        .ilike("line", f"%{keyword}%")
+    # 1) fetch id+line
+    resp = supabase.table("xeno") \
+        .select("id,line") \
+        .ilike("line", f"%{keyword}%") \
         .execute()
-    )
     rows = resp.data or []
     if not rows:
         return await cq.message.edit_text("❌ No matches found.")
 
-    # 2) pick a random count between 100–150
+    # 2) sample 100–150
     desired = random.randint(100, 150)
+    sampled = (random.choices(rows, k=desired)
+               if len(rows) < desired
+               else random.sample(rows, desired))
 
-    # 3) sample rows (with fallback if not enough)
-    if len(rows) < desired:
-        sampled = random.choices(rows, k=desired)
-    else:
-        sampled = random.sample(rows, desired)
+    # 3) delete them
+    ids = [r["id"] for r in sampled]
+    supabase.table("xeno").delete().in_("id", ids).execute()
 
-    # 4) delete sampled IDs from the table (synchronous)
-    ids_to_delete = [r["id"] for r in sampled]
-    delete_resp = supabase\
-        .from_("xeno")\
-        .delete()\
-        .in_("id", ids_to_delete)\
-        .execute()
-    # optional: check status_code (no .error attr)
-    if hasattr(delete_resp, "status_code") and delete_resp.status_code >= 400:
-        print("⚠️ Supabase delete failed:", delete_resp)
-
-    # 5) optional local dedupe tracking
-    used_file = "no_dupes.txt"
-    used = set()
-    if os.path.exists(used_file):
-        used = set(open(used_file).read().splitlines())
-    with open(used_file, "a") as f:
-        for r in sampled:
-            line = r["line"]
-            if line not in used:
-                f.write(line + "\n")
-
-    # 6) write out results to disk
+    # 4) write out ONLY user:pass (last two fields)
     os.makedirs("Generated", exist_ok=True)
     result_path = f"Generated/premium_{keyword}.txt"
     with open(result_path, "w", encoding="utf-8") as f:
         for r in sampled:
-            L = r["line"]
-            if include_urls:
-                f.write(L + "\n")
-            else:
-                user, pwd, *_ = L.split(":")
-                f.write(f"{user}:{pwd}\n")
+            parts = r["line"].strip().split(":")
+            f.write(":".join(parts[-2:]) + "\n")
 
-    # 7) build preview + inline-keyboard
-    preview = [r["line"] for r in sampled[:5]]
-    if not include_urls:
-        preview = [":".join(l.split(":")[-2:]) for l in preview]
-    preview_text = "\n".join(preview) + ("\n..." if len(sampled) > 5 else "")
+    # 5) build preview & keyboard
+    preview = "\n".join(
+        ":".join(r["line"].split(":")[-2:]) 
+        for r in sampled[:5]
+    ) + ("\n..." if len(sampled) > 5 else "")
 
-    label = "🌍 Full (URLs)" if include_urls else "✅ User:Pass"
     kb = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "📥 Download Results",
-                callback_data=f"download_results_{os.path.basename(result_path)}_{keyword}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📋 Copy Code",
-                callback_data=f"copy_code_{os.path.basename(result_path)}_{keyword}"
-            )
-        ],
+        [InlineKeyboardButton(
+            "📥 Download Results",
+            callback_data=f"download_results_{os.path.basename(result_path)}_{keyword}"
+        )],
+        [InlineKeyboardButton(
+            "📋 Copy Code",
+            callback_data=f"copy_code_{os.path.basename(result_path)}_{keyword}"
+        )],
     ])
 
     await cq.message.edit_text(
         f"🔎 PREMIUM `{keyword}`\n"
-        f"📄 Format: {label}\n"
         f"📌 Matches: `{len(sampled)}`\n\n"
-        f"🔹 Preview:\n```{preview_text}```",
+        f"🔹 Preview:\n```{preview}```",
         reply_markup=kb
     )
 
-    
 @app.on_callback_query(filters.regex("^copy_code_"))
 async def copy_results_text(_, cq: CallbackQuery):
     # strip off the "copy_code_" prefix, then split once at the final "_"
