@@ -464,52 +464,101 @@ async def ask_format(_, cq: CallbackQuery):
         f"🔎 Keyword: `{keyword}`\nChoose output format:", reply_markup=kb
     )
 
+import os
+import random
+from pyrogram import filters
+from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+
 @app.on_callback_query(filters.regex("^format_"))
 async def perform_search(_, cq: CallbackQuery):
-    _, keyword, fmt = cq.data.split("_",2)
+    # unpack callback payload
+    _, keyword, fmt = cq.data.split("_", 2)
     include_urls = (fmt == "full")
     await cq.answer("⏳ Searching…")
-    resp = supabase.from_("xeno").select("line").ilike("line", f"%{keyword}%").execute()
+
+    # 1) fetch id+line for all matches
+    resp = (
+        supabase
+        .from_("xeno")
+        .select("id,line")
+        .ilike("line", f"%{keyword}%")
+        .execute()
+    )
     rows = resp.data or []
     if not rows:
         return await cq.message.edit_text("❌ No matches found.")
-    all_lines = [r["line"] for r in rows]
-    count     = min(len(all_lines), random.randint(100,110))
-    selected  = random.sample(all_lines, count)
-    # optional dedupe tracking
+
+    # 2) pick a random count between 100–150
+    desired = random.randint(100, 150)
+
+    # 3) sample rows (with fallback if not enough)
+    if len(rows) < desired:
+        # pad with repeats if you really want exactly `desired`
+        sampled = random.choices(rows, k=desired)
+    else:
+        sampled = random.sample(rows, desired)
+
+    # 4) delete sampled IDs from the table
+    ids_to_delete = [r["id"] for r in sampled]
+    await supabase\
+        .from_("xeno")\
+        .delete()\
+        .in_("id", ids_to_delete)\
+        .execute()
+
+    # 5) optional local dedupe tracking
     used_file = "no_dupes.txt"
-    used = set(open(used_file).read().splitlines()) if os.path.exists(used_file) else set()
+    used = set()
+    if os.path.exists(used_file):
+        used = set(open(used_file).read().splitlines())
     with open(used_file, "a") as f:
-        for L in selected:
-            if L not in used:
-                f.write(L + "\n")
-    # write results
+        for r in sampled:
+            line = r["line"]
+            if line not in used:
+                f.write(line + "\n")
+
+    # 6) write out results to disk
     os.makedirs("Generated", exist_ok=True)
     result_path = f"Generated/premium_{keyword}.txt"
     with open(result_path, "w", encoding="utf-8") as f:
-        for L in selected:
+        for r in sampled:
+            L = r["line"]
             if include_urls:
                 f.write(L + "\n")
             else:
-                parts = L.split(":")
-                f.write(":".join(parts[-2:]) + "\n")
-    # preview
-    preview = selected[:5]
+                user, pwd, *_ = L.split(":")
+                f.write(f"{user}:{pwd}\n")
+
+    # 7) build preview + inline-keyboard
+    preview = [r["line"] for r in sampled[:5]]
     if not include_urls:
         preview = [":".join(l.split(":")[-2:]) for l in preview]
-    preview_text = "\n".join(preview) + ("\n..." if len(selected)>5 else "")
+    preview_text = "\n".join(preview) + ("\n..." if len(sampled) > 5 else "")
+
     label = "🌍 Full (URLs)" if include_urls else "✅ User:Pass"
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📥 Download Results",
-            callback_data=f"download_results_{os.path.basename(result_path)}_{keyword}")],
-        [InlineKeyboardButton("📋 Copy Code",
-            callback_data=f"copy_code_{os.path.basename(result_path)}_{keyword}")],
+        [
+            InlineKeyboardButton(
+                "📥 Download Results",
+                callback_data=f"download_results_{os.path.basename(result_path)}_{keyword}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📋 Copy Code",
+                callback_data=f"copy_code_{os.path.basename(result_path)}_{keyword}"
+            )
+        ],
     ])
-    await cq.message.edit_text(
-        f"🔎 PREMIUM `{keyword}`\n📄 Format: {label}\n📌 Matches: `{len(selected)}`\n\n"
-        f"🔹 Preview:\n```\n{preview_text}\n```", reply_markup=kb
-    )
 
+    await cq.message.edit_text(
+        f"🔎 PREMIUM `{keyword}`\n"
+        f"📄 Format: {label}\n"
+        f"📌 Matches: `{len(sampled)}`\n\n"
+        f"🔹 Preview:\n```{preview_text}```",
+        reply_markup=kb
+    )
+    
 @app.on_callback_query(filters.regex("^copy_code_"))
 async def copy_results_text(_, cq: CallbackQuery):
     # strip off the "copy_code_" prefix, then split once at the final "_"
