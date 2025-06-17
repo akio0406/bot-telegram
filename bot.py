@@ -813,7 +813,7 @@ async def admin_check_lines_cb(_, cq: CallbackQuery):
         for kw in KEYWORDS:
             res = (
                 supabase
-                .table("entries")
+                .table("xeno")
                 .select("id", count="exact")
                 .ilike("line", f"%{kw}%")
                 .execute()
