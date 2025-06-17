@@ -409,22 +409,27 @@ from pyrogram.errors import MessageNotModified
 # — Search submenus —
 @app.on_callback_query(filters.regex("^expand_garena$"))
 async def expand_garena(_, cq: CallbackQuery):
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎮 Garena.com",      callback_data="keyword_garena.com")],
-        [InlineKeyboardButton("🔐 100082",          callback_data="keyword_100082")],
-        [InlineKeyboardButton("🔐 100055",          callback_data="keyword_100055")],
-        [InlineKeyboardButton("🛡 Authgop",          callback_data="keyword_authgop.garena.com")],
-        [InlineKeyboardButton("🔐 Gaslite",          callback_data="keyword_gaslite")],
-        [InlineKeyboardButton("🔙 Back",             callback_data="back_to_main")],
-    ])
+    await cq.answer()  
+    # remove the old menu entirely
     try:
-        await cq.message.edit_text(
-            "🛡 GARENA SUB-KEYWORDS:",
-            reply_markup=kb
-        )
-    except MessageNotModified:
-        # text didn't change, just swap the keyboard
-        await cq.message.edit_reply_markup(kb)
+        await cq.message.delete()
+    except:
+        pass
+
+    # send a brand-new message
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎮 Garena.com", callback_data="keyword_garena.com")],
+        [InlineKeyboardButton("🔐 100082",      callback_data="keyword_100082")],
+        [InlineKeyboardButton("🔐 100055",      callback_data="keyword_100055")],
+        [InlineKeyboardButton("🛡 Authgop",      callback_data="keyword_authgop.garena.com")],
+        [InlineKeyboardButton("🔐 Gaslite",      callback_data="keyword_gaslite")],
+        [InlineKeyboardButton("🔙 Back",         callback_data="back_to_main")],
+    ])
+    await cq.message.reply(
+        "🛡 GARENA SUB-KEYWORDS:", 
+        reply_markup=kb
+    )
+
 
 @app.on_callback_query(filters.regex("^expand_socmeds$"))
 async def expand_socmeds(_, cq: CallbackQuery):
