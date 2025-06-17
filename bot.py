@@ -504,8 +504,9 @@ async def perform_search(_, cq: CallbackQuery):
         .delete()\
         .in_("id", ids_to_delete)\
         .execute()
-    if delete_resp.error:
-        print("❌ supabase delete error:", delete_resp.error)
+    # optional: check status_code (no .error attr)
+    if hasattr(delete_resp, "status_code") and delete_resp.status_code >= 400:
+        print("⚠️ Supabase delete failed:", delete_resp)
 
     # 5) optional local dedupe tracking
     used_file = "no_dupes.txt"
@@ -559,6 +560,7 @@ async def perform_search(_, cq: CallbackQuery):
         f"🔹 Preview:\n```{preview_text}```",
         reply_markup=kb
     )
+
     
 @app.on_callback_query(filters.regex("^copy_code_"))
 async def copy_results_text(_, cq: CallbackQuery):
