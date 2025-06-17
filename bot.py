@@ -481,20 +481,21 @@ async def back_to_main(_, cq: CallbackQuery):
 @app.on_callback_query(filters.regex("^keyword_"))
 async def ask_format(_, cq: CallbackQuery):
     await cq.answer()
-    keyword = cq.data.split("_",1)[1]
+    keyword = cq.data.split("_", 1)[1]
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ User:Pass only", callback_data=f"format_{keyword}_userpass")],
         [InlineKeyboardButton("🌍 Include URLs",    callback_data=f"format_{keyword}_full")],
     ])
-    try:
-        await cq.message.edit_text(
-            f"🔎 Keyword: `{keyword}`\nChoose output format:",
-            reply_markup=kb,
-            parse_mode="Markdown"
-        )
-    except MessageNotModified:
-        await cq.message.edit_reply_markup(kb)
 
+    text = f"🔎 Keyword: `{keyword}`\nChoose output format:"
+
+    try:
+        # no parse_mode or use lowercase "markdown"
+        await cq.message.edit_text(text, reply_markup=kb)
+    except MessageNotModified:
+        # only swap the keyboard if the text is identical
+        await cq.message.edit_reply_markup(kb)
 
 import os
 import random
