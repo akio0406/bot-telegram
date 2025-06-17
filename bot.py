@@ -160,21 +160,32 @@ async def on_decrypt_cb(_, cq: CallbackQuery):
     user_state[cq.from_user.id] = "decrypt"
     await cq.message.reply("📂 Send an encrypted `.py` or `.txt` file to decrypt.")
 
+from pyrogram.errors import MessageNotModified
+
 @app.on_callback_query(filters.regex("^menu_search$"))
 @requires_premium
 async def on_search_cb(_, cq: CallbackQuery):
     await cq.answer()
-    await cq.message.edit_reply_markup(None)
+    # safely clear old buttons without triggering 400
+    try:
+        await cq.message.edit_reply_markup(None)
+    except MessageNotModified:
+        pass
+
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎲 Roblox", callback_data="keyword_roblox")],
-        [InlineKeyboardButton("🔥 Mobile Legends", callback_data="keyword_mobilelegends")],
-        [InlineKeyboardButton("💳 Codashop", callback_data="keyword_codashop")],
-        [InlineKeyboardButton("🛡 Garena", callback_data="expand_garena")],
-        [InlineKeyboardButton("🌐 Social Media", callback_data="expand_socmeds")],
-        [InlineKeyboardButton("✉️ Email Prov", callback_data="expand_emails")],
-        [InlineKeyboardButton("🎮 Gaming", callback_data="expand_gaming")],
+        [InlineKeyboardButton("🎲 Roblox",             callback_data="keyword_roblox")],
+        [InlineKeyboardButton("🔥 Mobile Legends",     callback_data="keyword_mobilelegends")],
+        [InlineKeyboardButton("💳 Codashop",            callback_data="keyword_codashop")],
+        [InlineKeyboardButton("🛡 Garena",              callback_data="expand_garena")],
+        [InlineKeyboardButton("🌐 Social Media",        callback_data="expand_socmeds")],
+        [InlineKeyboardButton("✉️ Email Providers",   callback_data="expand_emails")],
+        [InlineKeyboardButton("🎮 Gaming",              callback_data="expand_gaming")],
     ])
-    await cq.message.reply("🔎 DATABASE SEARCH\n\n📌 Choose a keyword:", reply_markup=kb)
+
+    await cq.message.reply(
+        "🔎 DATABASE SEARCH\n\n📌 Choose a keyword:",
+        reply_markup=kb
+    )
 
 @app.on_callback_query(filters.regex("^menu_removeurl$"))
 @requires_premium
@@ -455,14 +466,21 @@ async def back_to_main(_, cq: CallbackQuery):
 
 @app.on_callback_query(filters.regex("^keyword_"))
 async def ask_format(_, cq: CallbackQuery):
+    await cq.answer()
     keyword = cq.data.split("_",1)[1]
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ User:Pass only", callback_data=f"format_{keyword}_userpass")],
         [InlineKeyboardButton("🌍 Include URLs",    callback_data=f"format_{keyword}_full")],
     ])
-    await cq.message.edit_text(
-        f"🔎 Keyword: `{keyword}`\nChoose output format:", reply_markup=kb
-    )
+    try:
+        await cq.message.edit_text(
+            f"🔎 Keyword: `{keyword}`\nChoose output format:",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+    except MessageNotModified:
+        await cq.message.edit_reply_markup(kb)
+
 
 import os
 import random
@@ -584,44 +602,31 @@ async def copy_results_text(_, cq: CallbackQuery):
 
 @app.on_callback_query(filters.regex("^download_results_"))
 async def download_results_file(_, cq: CallbackQuery):
-    # 0) ACK the button so the spinner goes away
-    await cq.answer()
+    await cq.answer()  # clear spinner
 
-    # 1) parse out the file name + keyword
     payload = cq.data[len("download_results_"):]
     filename, keyword = payload.rsplit("_", 1)
     path = os.path.join("Generated", filename)
 
-    # 2) guard against “I can’t find the file”
     if not os.path.isfile(path):
-        return await cq.message.edit_text(
-            "❌ Sorry, the result file has already expired or was deleted."
-        )
+        return await cq.message.reply("❌ Result file not found.")
 
-    # 3) send the document
     try:
-        # use chat.send_document instead of reply_document
-        await cq.message.chat.send_document(
-            path,
+        await cq.client.send_document(
+            chat_id=cq.message.chat.id,
+            document=path,
             caption=f"📄 PREMIUM results for `{keyword}`",
             parse_mode="Markdown"
         )
-    except Exception as e:
-        # log and notify
-        print("❌ Failed to send document", e)
-        return await cq.message.edit_text(
-            "❌ Failed to deliver the file. Please try again."
-        )
+    except Exception:
+        return await cq.message.reply("❌ Could not send the file.")
     finally:
-        # 4) cleanup
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+        os.remove(path)
 
-    # 5) remove the old preview+buttons
-    await cq.message.delete()
-
+    try:
+        await cq.message.delete()
+    except:
+        pass
 
 # — /redeem (enforce one-key-per-user) —
 @app.on_message(filters.command("redeem") & filters.private)
