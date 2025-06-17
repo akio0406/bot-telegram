@@ -493,18 +493,19 @@ async def perform_search(_, cq: CallbackQuery):
 
     # 3) sample rows (with fallback if not enough)
     if len(rows) < desired:
-        # pad with repeats if you really want exactly `desired`
         sampled = random.choices(rows, k=desired)
     else:
         sampled = random.sample(rows, desired)
 
-    # 4) delete sampled IDs from the table
+    # 4) delete sampled IDs from the table (synchronous)
     ids_to_delete = [r["id"] for r in sampled]
-    await supabase\
+    delete_resp = supabase\
         .from_("xeno")\
         .delete()\
         .in_("id", ids_to_delete)\
         .execute()
+    if delete_resp.error:
+        print("❌ supabase delete error:", delete_resp.error)
 
     # 5) optional local dedupe tracking
     used_file = "no_dupes.txt"
