@@ -699,13 +699,12 @@ async def adminmenu_cmd(_, m: Message):
             InlineKeyboardButton("📋 Show Banlist",   callback_data="admin_show_banlist"),
             InlineKeyboardButton("📈 Show Stats",     callback_data="admin_show_stats"),
         ],
-        # ← NEW LINE
         [
             InlineKeyboardButton("🔎 Check total lines", callback_data="admin_check_lines"),
+            InlineKeyboardButton("📢 Broadcast",          callback_data="admin_broadcast"),
         ],
     ])
     await m.reply("🛠 Admin Menu – choose an action:", reply_markup=kb)
-
 
 # Generate Key →
 @app.on_callback_query(filters.regex("^admin_genkey$") & filters.user(ADMIN_ID))
@@ -839,13 +838,53 @@ async def admin_check_lines_cb(_, cq: CallbackQuery):
     except Exception as e:
         await cq.message.reply(f"❌ Error checking lines:\n{e}")
 
+# Helper to fetch all redeemed user_ids
+def load_redeemed_user_ids() -> list[int]:
+    resp = (
+        supabase.table("xeno_keys")
+        .select("redeemed_by")
+        .neq("redeemed_by", None)
+        .eq("banned", False)
+        .execute()
+    )
+    rows = resp.data or []
+    return list({r["redeemed_by"] for r in rows if r.get("redeemed_by")})
+
+# Broadcast button → ask for message
+@app.on_callback_query(filters.regex("^admin_broadcast$") & filters.user(ADMIN_ID))
+async def admin_broadcast_cb(_, cq: CallbackQuery):
+    await start_flow(cq, "await_broadcast",
+        "📢 Send the message you want to broadcast to all redeemed users:"
+    )
         
-# — single text-handler for all multi-step flows —
+# — single text‐handler for all multi‐step admin flows —
 @app.on_message(filters.text & filters.private & filters.user(ADMIN_ID))
-async def admin_flow_handler(_, m: Message):
+async def admin_flow_handler(bot, m: Message):
     flow = admin_state.get(m.from_user.id)
 
-    # 1) Generate Key
+    # ─── Broadcast flow ───
+    if flow == "await_broadcast":
+        text = m.text.strip()
+        user_ids = load_redeemed_user_ids()
+        if not user_ids:
+            await m.reply("⚠️ No users found who redeemed a key.")
+            admin_state.pop(m.from_user.id, None)
+            return
+
+        sent = failed = 0
+        for uid in user_ids:
+            try:
+                await bot.send_message(uid, f"📢 **Broadcast**\n\n{text}")
+                sent += 1
+                await asyncio.sleep(0.1)
+            except Exception:
+                failed += 1
+
+        await m.reply(f"✅ Sent to {sent} users, failed for {failed}.")
+        admin_state.pop(m.from_user.id, None)
+        return
+
+    # ─── 1) Generate Key ───
     if flow == "await_duration":
         code  = m.text.strip()
         delta = parse_duration(code)
@@ -874,7 +913,7 @@ async def admin_flow_handler(_, m: Message):
             quote=True
         )
 
-    # 2) Remove Key
+    # ─── 2) Remove Key ───
     elif flow == "await_remove_key":
         key = m.text.strip().upper()
         resp = supabase.table("xeno_keys").select("key").eq("key", key).execute()
@@ -883,7 +922,7 @@ async def admin_flow_handler(_, m: Message):
         supabase.table("xeno_keys").delete().eq("key", key).execute()
         await m.reply(f"✅ Key {key} removed.", quote=True)
 
-    # 3) Extend Key
+    # ─── 3) Extend Key ───
     elif flow == "await_extend_key":
         parts = m.text.strip().split(maxsplit=1)
         if len(parts) != 2:
@@ -910,7 +949,7 @@ async def admin_flow_handler(_, m: Message):
             quote=True
         )
 
-    # 4) Ban User
+    # ─── 4) Ban User ───
     elif flow == "await_ban_user":
         try:
             target = int(m.text.strip())
@@ -925,7 +964,7 @@ async def admin_flow_handler(_, m: Message):
         msg   = f"✅ User `{target}` banned. Marked {count} key(s)." if count else "⚠️ No redeemed keys for that user."
         await m.reply(msg, quote=True)
 
-    # 5) Unban User
+    # ─── 5) Unban User ───
     elif flow == "await_unban_user":
         try:
             target = int(m.text.strip())
@@ -940,7 +979,7 @@ async def admin_flow_handler(_, m: Message):
         msg   = f"✅ User `{target}` unbanned. Cleared {count} key(s)." if count else "⚠️ No banned keys for that user."
         await m.reply(msg, quote=True)
 
-    # clear the flow state
+    # clear flow if no match
     admin_state.pop(m.from_user.id, None)
 
 # 6) Handle the “Show Stats” callback
