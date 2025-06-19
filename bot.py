@@ -843,17 +843,22 @@ def load_redeemed_user_ids() -> list[int]:
     """
     Return a deduped list of user_ids who have redeemed a non-banned key.
     """
+    # 1) grab every redeemed_by + banned flag
     resp = (
         supabase
         .table("xeno_keys")
-        .select("redeemed_by")
-        # filter out nulls properly
-        .not_("redeemed_by", "is", None)
-        .eq("banned", False)
+        .select("redeemed_by,banned")
         .execute()
     )
     rows = resp.data or []
-    return list({r["redeemed_by"] for r in rows})
+
+    # 2) keep only non-None + not banned
+    ids = {
+        r["redeemed_by"]
+        for r in rows
+        if r.get("redeemed_by") is not None and not r.get("banned", True)
+    }
+    return list(ids)
 
 # Broadcast button → ask for message
 @app.on_callback_query(filters.regex("^admin_broadcast$") & filters.user(ADMIN_ID))
