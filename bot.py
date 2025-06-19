@@ -17,6 +17,10 @@ from pyrogram.types import (
     InlineKeyboardButton
 )
 from supabase import create_client, SupabaseException
+from uuid import uuid4
+
+# in-memory store: token → (filepath, keyword)
+_search_sessions: dict[str, tuple[str,str]] = {}
 
 # — Load ENV —
 API_ID    = int(os.getenv("API_ID", "0"))
@@ -516,17 +520,15 @@ async def perform_search(_, cq: CallbackQuery):
     if not rows:
         return await cq.message.edit_text("❌ No matches found.")
 
-    # 2) sample 100–150
+    # 2) sample
     desired = random.randint(100, 150)
-    sampled = (random.choices(rows, k=desired)
-               if len(rows) < desired
-               else random.sample(rows, desired))
+    sampled = random.sample(rows, desired) if len(rows) >= desired else random.choices(rows, k=desired)
 
-    # 3) delete them
+    # 3) delete them from DB
     ids = [r["id"] for r in sampled]
     supabase.table("xeno").delete().in_("id", ids).execute()
 
-    # 4) write out ONLY user:pass (last two fields)
+    # 4) write to disk
     os.makedirs("Generated", exist_ok=True)
     result_path = f"Generated/premium_{keyword}.txt"
     with open(result_path, "w", encoding="utf-8") as f:
@@ -534,21 +536,22 @@ async def perform_search(_, cq: CallbackQuery):
             parts = r["line"].strip().split(":")
             f.write(":".join(parts[-2:]) + "\n")
 
-    # 5) build preview & keyboard
+    # 5) prepare preview
     preview = "\n".join(
-        ":".join(r["line"].split(":")[-2:]) 
+        ":".join(r["line"].split(":")[-2:])
         for r in sampled[:5]
     ) + ("\n..." if len(sampled) > 5 else "")
 
+    # 6) generate a short token and stash the file + keyword
+    token = uuid4().hex[:8]
+    _search_sessions[token] = (result_path, keyword)
+
+    # 7) build tiny callback_data buttons
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "📥 Download Results",
-            callback_data=f"download_results_{os.path.basename(result_path)}_{keyword}"
-        )],
-        [InlineKeyboardButton(
-            "📋 Copy Code",
-            callback_data=f"copy_code_{os.path.basename(result_path)}_{keyword}"
-        )],
+        [
+           InlineKeyboardButton("📥 Download", callback_data=f"dl_{token}"),
+           InlineKeyboardButton("📋 Copy",     callback_data=f"cp_{token}")
+        ]
     ])
 
     await cq.message.edit_text(
