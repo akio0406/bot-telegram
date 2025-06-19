@@ -561,62 +561,34 @@ async def perform_search(_, cq: CallbackQuery):
         reply_markup=kb
     )
 
-@app.on_callback_query(filters.regex("^copy_code_"))
-async def copy_results_text(_, cq: CallbackQuery):
-    # strip off the "copy_code_" prefix, then split once at the final "_"
-    payload = cq.data[len("copy_code_"):]
-    filename, keyword = payload.rsplit("_", 1)
-
-    path = f"Generated/{filename}"
-    if os.path.exists(path):
-        content = open(path, "r", encoding="utf-8").read()
-        if len(content) > 4096:
-            content = content[:4090] + "...\n[Truncated]"
-        await cq.message.reply(
-            f"<b>Results for:</b> <code>{keyword}</code>\n<pre>{content}</pre>",
-            parse_mode="HTML"
-        )
-        os.remove(path)
-
-    # remove the inline‐keyboard
-    await cq.message.delete()
-
-@app.on_callback_query(filters.regex("^download_results_"))
+@app.on_callback_query(filters.regex(r"^dl_"))
 async def download_results_file(_, cq: CallbackQuery):
-    await cq.answer()  # clear the spinner
+    await cq.answer()
+    token = cq.data.split("_", 1)[1]
+    path, keyword = _search_sessions.pop(token, (None, None))
+    if not path or not os.path.isfile(path):
+        return await cq.message.edit_text("❌ File not found.")
+    await cq.message.reply_document(path, caption=f"📄 Results for `{keyword}`")
+    os.remove(path)
 
-    # parse filename + keyword
-    payload  = cq.data[len("download_results_"):]
-    filename, keyword = payload.rsplit("_", 1)
-    path     = os.path.join("Generated", filename)
-
-    # guard: file must exist
-    if not os.path.isfile(path):
-        return await cq.message.edit_text("❌ Result file not found.")
-
-    # try sending
-    try:
-        await cq.message.reply_document(
-            document=path,
-            caption=f"📄 PREMIUM results for `{keyword}`"
-        )
-    except Exception as e:
-        # log the real error
-        print("❌ send_document failed:", repr(e))
-        return await cq.message.edit_text("❌ Could not send the file.")
-    finally:
-        # cleanup in any case
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-
-    # remove the old preview + buttons
-    try:
-        await cq.message.delete()
-    except:
-        pass
-
+@app.on_callback_query(filters.regex(r"^cp_"))
+async def copy_results_text(_, cq: CallbackQuery):
+    await cq.answer()
+    token = cq.data.split("_", 1)[1]
+    path, keyword = _search_sessions.pop(token, (None, None))
+    if not path or not os.path.isfile(path):
+        return await cq.message.edit_text("❌ File not found.")
+    content = open(path, "r", encoding="utf-8").read()
+    if len(content) > 4090:
+        content = content[:4090] + "...\n[Truncated]"
+    await cq.message.reply(
+        f"<b>Results for:</b> <code>{keyword}</code>\n<pre>{content}</pre>",
+        parse_mode="HTML"
+    )
+    os.remove(path)
+    # clean up the inline-keyboard on the old message
+    try: await cq.message.delete()
+    except: pass
 
 # — /redeem (enforce one-key-per-user) —
 @app.on_message(filters.command("redeem") & filters.private)
