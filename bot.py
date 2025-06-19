@@ -1001,34 +1001,40 @@ async def admin_show_stats_cb(_, cq: CallbackQuery):
     except:
         pass
 
+    # fetch all keys
     resp = supabase.table("xeno_keys").select("*").execute()
     rows = resp.data or []
 
-    redeemed = [r for r in rows if r.get("redeemed_by")]
+    # filter redeemed entries
+    redeemed = [r for r in rows if r.get("redeemed_by") is not None]
     user_ids = [r["redeemed_by"] for r in redeemed]
 
-    # 1) try to batch-fetch all Telegram users
+    # 1) batch‐fetch Telegram users (unpack IDs with *)
     try:
-        users = await cq.client.get_users(user_ids)  # returns a list of User objects
+        users = await cq.client.get_users(*user_ids)
     except Exception:
         users = []
 
-    # build a map uid → User
+    # map uid → User
     user_map = {u.id: u for u in users if hasattr(u, "id")}
 
-    lines = ["📊 BOT STATS", "", f"🔑 Total keys: {len(rows)}",
-             f"✅ Redeemed:    {len(redeemed)}",
-             f"❌ Unredeemed:  {len(rows) - len(redeemed)}", "",
-             "👤 Redeemed Users:", ""]
-
+    # build report lines
     now = datetime.now(timezone.utc)
+    lines = [
+        "📊 BOT STATS", "",
+        f"🔑 Total keys: {len(rows)}",
+        f"✅ Redeemed:    {len(redeemed)}",
+        f"❌ Unredeemed:  {len(rows) - len(redeemed)}",
+        "",
+        "👤 Redeemed Users:", ""
+    ]
+
     for r in redeemed:
         uid    = r["redeemed_by"]
         key    = r["key"]
         expiry = datetime.fromisoformat(r["expiry"].replace("Z","+00:00"))
         rem    = expiry - now
 
-        # compute time-left string…
         if rem.total_seconds() <= 0:
             left = "Expired"
         else:
@@ -1039,19 +1045,13 @@ async def admin_show_stats_cb(_, cq: CallbackQuery):
                     f"{h}h {m}m"    if h else
                     f"{m}m")
 
-        # pick up the user object if we have it
+        # select display name
         user = user_map.get(uid)
         if user:
-            # show @username if set, else "First Last"
-            if user.username:
-                uname = "@" + user.username
-            else:
-                name = user.first_name or ""
-                if user.last_name:
-                    name += " " + user.last_name
-                uname = name or "(no name)"
+            uname = "@" + user.username if user.username else (
+                f"{user.first_name or ''} {user.last_name or ''}".strip() or "(no name)"
+            )
         else:
-            # we couldn’t fetch them at all
             uname = "(unavailable)"
 
         lines += [
