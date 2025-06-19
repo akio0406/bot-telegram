@@ -840,15 +840,20 @@ async def admin_check_lines_cb(_, cq: CallbackQuery):
 
 # Helper to fetch all redeemed user_ids
 def load_redeemed_user_ids() -> list[int]:
+    """
+    Return a deduped list of user_ids who have redeemed a non-banned key.
+    """
     resp = (
-        supabase.table("xeno_keys")
+        supabase
+        .table("xeno_keys")
         .select("redeemed_by")
-        .neq("redeemed_by", None)
+        # filter out nulls properly
+        .not_("redeemed_by", "is", None)
         .eq("banned", False)
         .execute()
     )
     rows = resp.data or []
-    return list({r["redeemed_by"] for r in rows if r.get("redeemed_by")})
+    return list({r["redeemed_by"] for r in rows})
 
 # Broadcast button → ask for message
 @app.on_callback_query(filters.regex("^admin_broadcast$") & filters.user(ADMIN_ID))
@@ -991,64 +996,73 @@ async def admin_show_stats_cb(_, cq: CallbackQuery):
     except:
         pass
 
-    # fetch all keys
     resp = supabase.table("xeno_keys").select("*").execute()
     rows = resp.data or []
 
-    total_keys    = len(rows)
-    redeemed_rows = [r for r in rows if r.get("redeemed_by")]
-    unredeemed    = total_keys - len(redeemed_rows)
-    now           = datetime.now(timezone.utc)
+    redeemed = [r for r in rows if r.get("redeemed_by")]
+    user_ids = [r["redeemed_by"] for r in redeemed]
 
-    # build a plain‐text report
-    lines = [
-        "📊 BOT STATS",
-        "",
-        f"🔑 Total keys: {total_keys}",
-        f"✅ Redeemed:    {len(redeemed_rows)}",
-        f"❌ Unredeemed:  {unredeemed}",
-        "",
-        "👤 Redeemed Users:",
-        ""
-    ]
+    # 1) try to batch-fetch all Telegram users
+    try:
+        users = await cq.client.get_users(user_ids)  # returns a list of User objects
+    except Exception:
+        users = []
 
-    for r in redeemed_rows:
-        key    = r["key"]
+    # build a map uid → User
+    user_map = {u.id: u for u in users if hasattr(u, "id")}
+
+    lines = ["📊 BOT STATS", "", f"🔑 Total keys: {len(rows)}",
+             f"✅ Redeemed:    {len(redeemed)}",
+             f"❌ Unredeemed:  {len(rows) - len(redeemed)}", "",
+             "👤 Redeemed Users:", ""]
+
+    now = datetime.now(timezone.utc)
+    for r in redeemed:
         uid    = r["redeemed_by"]
+        key    = r["key"]
         expiry = datetime.fromisoformat(r["expiry"].replace("Z","+00:00"))
         rem    = expiry - now
+
+        # compute time-left string…
         if rem.total_seconds() <= 0:
             left = "Expired"
         else:
-            days, rem_secs = divmod(int(rem.total_seconds()), 86400)
-            hrs, rem_secs  = divmod(rem_secs, 3600)
-            mins, _        = divmod(rem_secs, 60)
-            left = (f"{days}d {hrs}h {mins}m" if days
-                   else f"{hrs}h {mins}m" if hrs
-                   else f"{mins}m")
+            d, s = divmod(int(rem.total_seconds()), 86400)
+            h, s = divmod(s, 3600)
+            m, _ = divmod(s, 60)
+            left = (f"{d}d {h}h {m}m" if d else
+                    f"{h}h {m}m"    if h else
+                    f"{m}m")
 
-        try:
-            user = await cq.client.get_users(uid)
-            uname = "@" + user.username if user.username else "(no username)"
-        except:
-            uname = "(unknown)"
+        # pick up the user object if we have it
+        user = user_map.get(uid)
+        if user:
+            # show @username if set, else "First Last"
+            if user.username:
+                uname = "@" + user.username
+            else:
+                name = user.first_name or ""
+                if user.last_name:
+                    name += " " + user.last_name
+                uname = name or "(no name)"
+        else:
+            # we couldn’t fetch them at all
+            uname = "(unavailable)"
 
         lines += [
             f"- {uid} {uname}",
             f"   • Key:    {key}",
-            f"   • Expires: {expiry}",
-            f"   • Left:    {left}",
+            f"   • Left:   {left}",
             ""
         ]
 
     report = "\n".join(lines)
-
-    # if too long, send as a file
     if len(report) > 4000:
-        with open("stats.txt", "w", encoding="utf-8") as f:
+        path = "stats.txt"
+        with open(path, "w", encoding="utf-8") as f:
             f.write(report)
-        await cq.message.reply_document("stats.txt", caption="📊 Full stats")
-        os.remove("stats.txt")
+        await cq.message.reply_document(path, caption="📊 Full stats")
+        os.remove(path)
     else:
         await cq.message.reply(report)
         
